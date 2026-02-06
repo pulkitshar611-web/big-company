@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
-import prisma from '../utils/prisma';
+import prisma, { withRetry } from '../utils/prisma';
 import { generateToken, hashPassword, comparePassword } from '../utils/auth';
+
 
 export const register = async (req: Request, res: Response) => {
   try {
@@ -96,8 +97,8 @@ export const login = async (req: Request, res: Response) => {
       else if (req.baseUrl.includes('admin')) targetuser_role = 'admin';
     }
 
-    // Find User
-    const user = await prisma.user.findFirst({
+    // Find User with retry for connection issues
+    const user = await withRetry(() => prisma.user.findFirst({
       where: {
         OR: [
           { email: email || undefined },
@@ -111,7 +112,8 @@ export const login = async (req: Request, res: Response) => {
         wholesalerProfile: true,
         employeeProfile: true
       }
-    });
+    }));
+
 
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials or role' });

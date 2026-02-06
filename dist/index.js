@@ -63,7 +63,7 @@ const allowedOrigins = [
     "http://localhost:9000",
     "http://127.0.0.1:9001",
     "https://big-company-frontend.vercel.app",
-    "https://big-pos-backend-production.up.railway.app",
+    "https://big-company-production.up.railway.app",
     "https://big-pos.netlify.app"
 ];
 app.use((0, cors_1.default)({

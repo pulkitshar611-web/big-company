@@ -77,7 +77,7 @@ node dist/index.js
 npm start
 ```
 
-The server will start on `https://big-pos-backend-production.up.railway.app`
+The server will start on `https://big-company-production.up.railway.app/`
 
 ## Demo Credentials
 
@@ -268,7 +268,7 @@ You can test the API using:
 Example login request:
 
 ```bash
-curl -X POST https://big-pos-backend-production.up.railway.app/retailer/auth/login \
+curl -X POST https://big-company-production.up.railway.app/retailer/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"retailer@bigcompany.rw","password":"retailer123"}'
 ```
