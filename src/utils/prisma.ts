@@ -9,6 +9,11 @@ const RETRY_DELAY = 1000; // 1 second
 
 // Create Prisma client with connection pool settings for Railway
 const prisma = new PrismaClient({
+  datasources: {
+    db: {
+      url: process.env.DATABASE_URI,
+    },
+  },
   log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
 });
 
