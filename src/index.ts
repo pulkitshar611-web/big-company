@@ -32,7 +32,8 @@ const allowedOrigins = [
   "http://127.0.0.1:9001",
   "https://big-company-frontend.vercel.app",
   "https://big-pos-backend-production.up.railway.app",
-  "https://big-pos.netlify.app"
+  "https://big-pos.netlify.app",
+  "https://bigpos.kiaantechnology.com"
 ];
 
 app.use(cors({
