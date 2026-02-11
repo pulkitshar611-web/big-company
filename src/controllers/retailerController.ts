@@ -1838,12 +1838,14 @@ export const topUpWallet = async (req: AuthRequest, res: Response) => {
     // PALMKASH INTEGRATION
     // ==========================================
     let externalRef = null;
+    let transactionRef = `TOPUP-${Date.now()}`; // Correct prefix for webhook
+
     if (source === 'mobile_money' || source === 'momo') {
         const palmKash = (await import('../services/palmKash.service')).default;
         const pmResult = await palmKash.initiatePayment({
             amount: parseFloat(amount),
-            phoneNumber: (retailerProfile as any).user?.phone || req.body.phone || '',
-            referenceId: `RTOP-${Date.now()}`,
+            phoneNumber: req.body.phone || (retailerProfile as any).user?.phone || '',
+            referenceId: transactionRef,
             description: `Retailer Wallet Topup`
         });
 
@@ -1853,16 +1855,26 @@ export const topUpWallet = async (req: AuthRequest, res: Response) => {
         externalRef = pmResult.transactionId;
     }
 
-    // Updated to just update balance for now as WalletTransaction is consumer-only in current schema
-    // Update Wallet Balance
-    const updatedProfile = await prisma.retailerProfile.update({
-      where: { id: retailerProfile.id },
+    // Create Pending Transaction
+    const transaction = await prisma.walletTransaction.create({
       data: {
-        walletBalance: { increment: parseFloat(amount) }
+        retailerId: retailerProfile.id,
+        // walletId is optional now, so we can omit it for retailer
+        type: 'topup',
+        amount: parseFloat(amount),
+        description: `Wallet Topup via ${source}`,
+        reference: transactionRef, // Local reference
+        status: 'pending'
       }
     });
 
-    res.json({ success: true, message: 'Capital added successfully', balance: updatedProfile.walletBalance, transactionId: externalRef });
+    res.json({ 
+      success: true, 
+      message: 'Payment initiated. Please approve on your phone.', 
+      transactionId: transactionRef,
+      externalRef: externalRef,
+      status: 'pending'
+    });
   } catch (error: any) {
     console.error('Error adding capital:', error);
     res.status(500).json({ error: error.message });

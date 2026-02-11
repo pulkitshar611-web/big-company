@@ -21,7 +21,9 @@ export const getGasMeters = async (req: AuthRequest, res: Response) => {
                 status: { not: 'removed' }
             },
             include: {
-                gasTopups: true
+                gasTopups: {
+                    where: { status: 'completed' }
+                }
             },
             orderBy: { createdAt: 'desc' }
         });
@@ -263,12 +265,12 @@ export const topupGas = async (req: AuthRequest, res: Response) => {
                 newBalance = wallet?.balance || 0;
             } else if (payment_method === 'mobile_money') {
                 // ==========================================
-                // PALMKASH INTEGRATION (Sandbox Sync)
+                // PALMKASH INTEGRATION (Pending Status)
                 // ==========================================
                 const palmKash = (await import('../services/palmKash.service')).default;
                 const pmResult = await palmKash.initiatePayment({
                     amount: amount,
-                    phoneNumber: (consumerProfile as any).user?.phone || req.body.customer_phone || '',
+                    phoneNumber: req.body.phone || (consumerProfile as any).user?.phone || req.body.customer_phone || '',
                     referenceId: `GAS-${Date.now()}`,
                     description: `Gas topup for meter ${meter_number}`
                 });
@@ -277,17 +279,33 @@ export const topupGas = async (req: AuthRequest, res: Response) => {
                     throw new Error(pmResult.error || 'PalmKash payment failed');
                 }
                 
-                // For order metadata and reference
-                (order as any).metadata = JSON.stringify({ 
-                    paymentMethod: 'mobile_money',
-                    gateway: 'palmkash',
-                    externalRef: pmResult.transactionId
+                // For order metadata and reference - SAVE IT TO DB!
+                // We create a pending order and topup
+                // We must update the objects before returning from transaction or rely on create override?
+                // Actually, Prisma create is already done above with 'completed' status.
+                // We need to modify the create call logic OR update it here.
+                // Since 'order' and 'topup' are already created above (lines 182, 194), we need to update them.
+                
+                await tx.gasTopup.update({
+                    where: { id: topup.id },
+                    data: { status: 'pending', orderId: order.id.toString() } // Ensure orderId is linked
                 });
 
-                const wallet = await tx.wallet.findFirst({
-                    where: { consumerId: consumerProfile.id, type: 'dashboard_wallet' }
+                await tx.customerOrder.update({
+                    where: { id: order.id },
+                    data: { 
+                        status: 'pending',
+                        metadata: JSON.stringify({ 
+                            paymentMethod: 'mobile_money',
+                            gateway: 'palmkash',
+                            externalRef: pmResult.transactionId,
+                            reference: pmResult.transactionId // Webhook looks for this
+                        })
+                    }
                 });
-                newBalance = wallet?.balance || 0;
+
+                // Return special result indicating pending
+                return { topup, order, newBalance: 0, rewardUnits: 0, isPending: true, transactionId: pmResult.transactionId };
             }
 
             // Award gas rewards (10% of units)
@@ -304,7 +322,20 @@ export const topupGas = async (req: AuthRequest, res: Response) => {
             return { topup, order, newBalance, rewardUnits };
         });
 
-        const { topup, order, newBalance, rewardUnits } = result;
+        const { topup, order, newBalance, rewardUnits, isPending, transactionId } = result as any;
+
+        if (isPending) {
+            res.json({
+                success: true,
+                message: 'Payment initiated. Please check your phone.',
+                data: {
+                    order_id: order.id,
+                    status: 'pending',
+                    transaction_id: transactionId
+                }
+            });
+            return;
+        }
 
         // Generate gas meter token (16 digits formatted as XXXX-XXXX-XXXX-XXXX)
         const generateToken = () => {

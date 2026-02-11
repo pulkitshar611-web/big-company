@@ -27,6 +27,8 @@ const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:9001",
   "http://localhost:9000",
+  "http://127.0.0.1:3062",
+  "http://127.0.0.1:5173",
   "http://127.0.0.1:9001",
   "https://big-company-frontend.vercel.app",
   "https://big-pos-backend-production.up.railway.app",
@@ -55,10 +57,14 @@ app.use(express.urlencoded({ limit: '10mb', extended: true }));
 // Request Logger
 app.use((req, res, next) => {
   const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] ${req.method} ${req.url}`);
-  if (req.body && Object.keys(req.body).length > 0) {
-    console.log(`  Body: ${JSON.stringify(req.body)}`);
-  }
+  const logMsg = `[${timestamp}] ${req.method} ${req.url}\n${req.body && Object.keys(req.body).length > 0 ? `  Body: ${JSON.stringify(req.body)}\n` : ''}`;
+  console.log(logMsg);
+  try {
+     const fs = require('fs');
+     const path = require('path');
+     const os = require('os');
+     fs.appendFileSync(path.join(os.tmpdir(), 'backend_output.log'), logMsg);
+  } catch (e) {}
   next();
 });
 
@@ -119,4 +125,29 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('CRITICAL UNCAUGHT EXCEPTION:', err);
+  // Log to file
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const logPath = path.join(__dirname, '../error.log');
+    const timestamp = new Date().toISOString();
+    fs.appendFileSync(logPath, `[${timestamp}] FATAL UNCAUGHT EXCEPTION: ${err.stack || err}\n`);
+  } catch (e) {}
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('CRITICAL UNHANDLED REJECTION:', reason);
+  // Log to file
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const logPath = path.join(__dirname, '../error.log');
+    const timestamp = new Date().toISOString();
+    fs.appendFileSync(logPath, `[${timestamp}] FATAL UNHANDLED REJECTION: ${reason}\n`);
+  } catch (e) {}
 });

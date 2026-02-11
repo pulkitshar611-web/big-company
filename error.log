@@ -69,4 +69,14 @@
     at C:\Users\Admin\Desktop\big-pos\big-pos-backend\node_modules\router\index.js:297:9
     at processParams (C:\Users\Admin\Desktop\big-pos\big-pos-backend\node_modules\router\index.js:582:12)
     at next (C:\Users\Admin\Desktop\big-pos\big-pos-backend\node_modules\router\index.js:291:5)
-    at Function.handle (C:\Users\Admin\Desktop\big-pos\big-pos-backend\node_modules\router\index.js:186:3)\n
+    at Function.handle (C:\Users\Admin\Desktop\big-pos\big-pos-backend\node_modules\router\index.js:186:3)\n[2026-02-11T05:50:28.279Z] SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2)
+    at JSON.parse (<anonymous>)
+    at parse (C:\Users\asus\OneDrive\Documents\big_company\backend\node_modules\body-parser\lib\types\json.js:74:19)
+    at C:\Users\asus\OneDrive\Documents\big_company\backend\node_modules\body-parser\lib\read.js:163:18
+    at AsyncResource.runInAsyncScope (node:async_hooks:211:14)
+    at invokeCallback (C:\Users\asus\OneDrive\Documents\big_company\backend\node_modules\raw-body\index.js:238:16)
+    at done (C:\Users\asus\OneDrive\Documents\big_company\backend\node_modules\raw-body\index.js:227:7)
+    at IncomingMessage.onEnd (C:\Users\asus\OneDrive\Documents\big_company\backend\node_modules\raw-body\index.js:287:7)
+    at IncomingMessage.emit (node:events:518:28)
+    at IncomingMessage.emit (node:domain:489:12)
+    at endReadableNT (node:internal/streams/readable:1698:12)\n

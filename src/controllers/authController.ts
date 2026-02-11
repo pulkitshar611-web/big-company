@@ -87,6 +87,7 @@ export const register = async (req: Request, res: Response) => {
 export const login = async (req: Request, res: Response) => {
   try {
     const { email, password, phone, pin } = req.body;
+    console.log('Login attempt:', { email, phone, role: req.body.role, baseUrl: req.baseUrl });
 
     let targetuser_role = req.body.role;
     if (!targetuser_role) {
@@ -96,6 +97,7 @@ export const login = async (req: Request, res: Response) => {
       else if (req.baseUrl.includes('employee')) targetuser_role = 'employee';
       else if (req.baseUrl.includes('admin')) targetuser_role = 'admin';
     }
+    console.log('Determined role:', targetuser_role);
 
     // Find User with retry for connection issues
     const user = await withRetry(() => prisma.user.findFirst({
