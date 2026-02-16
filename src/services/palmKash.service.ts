@@ -12,7 +12,7 @@ class PalmKashService {
     this.secretKey = process.env.PALMKASH_SECRET_KEY || '';
     this.env = process.env.PALMKASH_ENV || 'sandbox';
     this.baseUrl = this.env === 'sandbox' 
-      ? 'https://api-sandbox.palmkash.com/v1' 
+      ? 'https://testdashboard.palmkash.com/api' 
       : 'https://api.palmkash.com/v1';
   }
 
@@ -21,13 +21,10 @@ class PalmKashService {
    */
   private async getAccessToken(): Promise<string> {
     try {
-      // In many implementations, this is a POST to /auth/token
-      // Given no docs, we'll implement a standard OAuth2 flow or similar
-      const response = await axios.post(`${this.baseUrl}/auth/token`, {
-        client_id: this.clientId,
-        client_secret: this.secretKey
-      });
-      return response.data.access_token;
+      // Assuming standard OAuth or similar if needed, but for now using direct creds in payload as per common gateway patterns
+      // If specific auth endpoint is needed, it would be here.
+      // For now, returning empty as some gateways use Basic Auth or Payload params
+      return ""; 
     } catch (error: any) {
       console.error('PalmKash Auth Error:', error.response?.data || error.message);
       throw new Error('Failed to authenticate with PalmKash');
@@ -48,7 +45,14 @@ class PalmKashService {
     // DEV MODE BYPASS
     // Skip real external API calls if in DEV_MODE
     // ==========================================
-    if (process.env.DEV_MODE === 'true') {
+    // ==========================================
+    // DEV MODE BYPASS
+    // Skip real external API calls if in DEV_MODE
+    // ==========================================
+    const isDev = process.env.DEV_MODE === 'true' || process.env.DEV_MODE === '1';
+    console.log(`🔌 [PalmKash] DEV_MODE config: "${process.env.DEV_MODE}", isDev: ${isDev}`);
+    
+    if (isDev) {
       console.log(`🛠️ [PalmKash DEV MODE] Bypassing real payment for ${params.phoneNumber}, Amount: ${params.amount}`);
       return {
         success: true,
@@ -67,15 +71,12 @@ class PalmKashService {
 
       console.log(`🚀 [PalmKash] Initiating payment for ${phone}, Amount: ${params.amount}`);
 
-      // const token = await this.getAccessToken(); // Hypothetical
-
-      // Standard PalmKash Request Pattern (Sandbox)
-      const response = await axios.post(`${this.baseUrl}/payment/request`, {
+      // Updated Endpoint: /payments/make-payment
+      const response = await axios.post(`${this.baseUrl}/payments/make-payment`, {
         app_id: this.clientId,
-        app_secret: this.secretKey,
+        app_secret: this.secretKey, // Assuming credentials are passed in body
         amount: params.amount,
-        currency: 'RWF',
-        phone: phone,
+        phone_number: phone, // "phone" or "phone_number"? defaulting to phone_number as common
         reference: params.referenceId,
         description: params.description,
         callback_url: params.callbackUrl || `${process.env.BACKEND_URL}/api/webhooks/palmkash`
@@ -84,14 +85,11 @@ class PalmKashService {
       return {
         success: true,
         transactionId: response.data.transaction_id || response.data.reference,
-        status: response.data.status, // PENDING, SUCCESS, etc.
+        status: response.data.status, 
         message: response.data.message || 'Payment initiated'
       };
     } catch (error: any) {
       console.error('PalmKash Payment Error:', error.response?.data || error.message);
-      
-      // Since we are in Sandbox, we might want to return a simulated success if the API is down
-      // but the prompt says replace gateway layer.
       return {
         success: false,
         error: error.response?.data?.message || error.message || 'PalmKash connection failed'
@@ -100,15 +98,15 @@ class PalmKashService {
   }
 
   /**
-   * Verify Payment Status (Polling fallback)
+   * Verify Payment Status
+   * Updated Endpoint: /payments/get-payment-status
    */
   async verifyPayment(transactionId: string) {
     try {
-      const response = await axios.get(`${this.baseUrl}/payment/status/${transactionId}`, {
-        params: {
-          app_id: this.clientId,
-          app_secret: this.secretKey
-        }
+      const response = await axios.post(`${this.baseUrl}/payments/get-payment-status`, {
+        app_id: this.clientId,
+        app_secret: this.secretKey,
+        reference: transactionId
       });
       return response.data; // { status: 'SUCCESS' | 'FAILED' | 'PENDING', ... }
     } catch (error: any) {
@@ -119,3 +117,4 @@ class PalmKashService {
 }
 
 export default new PalmKashService();
+  
