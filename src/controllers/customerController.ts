@@ -444,7 +444,7 @@ export const getWalletTransactions = async (req: AuthRequest, res: Response) => 
             success: true,
             data: transactions.map(t => ({
                 id: t.id,
-                wallet_type: t.wallet.type,
+                wallet_type: t.wallet?.type || 'N/A',
                 type: t.type,
                 amount: t.amount,
                 description: t.description,
