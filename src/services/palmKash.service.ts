@@ -11,9 +11,7 @@ class PalmKashService {
     this.clientId = process.env.PALMKASH_CLIENT_ID || '';
     this.secretKey = process.env.PALMKASH_SECRET_KEY || '';
     this.env = process.env.PALMKASH_ENV || 'sandbox';
-    this.baseUrl = this.env === 'sandbox' 
-      ? 'https://testdashboard.palmkash.com/api' 
-      : 'https://api.palmkash.com/v1';
+    this.baseUrl = process.env.PALMKASH_API_URL || 'https://testdashboard.palmkash.com/api';
   }
 
   /**
@@ -21,9 +19,7 @@ class PalmKashService {
    */
   private async getAccessToken(): Promise<string> {
     try {
-      // Assuming standard OAuth or similar if needed, but for now using direct creds in payload as per common gateway patterns
-      // If specific auth endpoint is needed, it would be here.
-      // For now, returning empty as some gateways use Basic Auth or Payload params
+ 
       return ""; 
     } catch (error: any) {
       console.error('PalmKash Auth Error:', error.response?.data || error.message);
@@ -41,14 +37,7 @@ class PalmKashService {
     description: string;
     callbackUrl?: string;
   }) {
-    // ==========================================
-    // DEV MODE BYPASS
-    // Skip real external API calls if in DEV_MODE
-    // ==========================================
-    // ==========================================
-    // DEV MODE BYPASS
-    // Skip real external API calls if in DEV_MODE
-    // ==========================================
+ 
     const isDev = process.env.DEV_MODE === 'true' || process.env.DEV_MODE === '1';
     console.log(`🔌 [PalmKash] DEV_MODE config: "${process.env.DEV_MODE}", isDev: ${isDev}`);
     
@@ -63,10 +52,15 @@ class PalmKashService {
     }
 
     try {
-      // Ensure phone number starts with 250 for Rwanda if it's 10 digits
-      let phone = params.phoneNumber;
+      // Ensure phone number starts with 250 for Rwanda
+      let phone = params.phoneNumber.replace(/\s+/g, ''); // Remove spaces
       if (phone.startsWith('0') && phone.length === 10) {
         phone = '250' + phone.substring(1);
+      } else if (phone.length === 9 || phone.length === 10) {
+        // If it's a 9 or 10 digit number without 250, add it
+        if (!phone.startsWith('250')) {
+             phone = '250' + phone;
+        }
       }
 
       console.log(`🚀 [PalmKash] Initiating payment for ${phone}, Amount: ${params.amount}`);
@@ -74,12 +68,22 @@ class PalmKashService {
       // Updated Endpoint: /payments/make-payment
       const response = await axios.post(`${this.baseUrl}/payments/make-payment`, {
         app_id: this.clientId,
-        app_secret: this.secretKey, // Assuming credentials are passed in body
+        app_secret: this.secretKey, 
         amount: params.amount,
-        phone_number: phone, // "phone" or "phone_number"? defaulting to phone_number as common
+        phone_number: phone, 
         reference: params.referenceId,
         description: params.description,
         callback_url: params.callbackUrl || `${process.env.BACKEND_URL}/api/webhooks/palmkash`
+      }, {
+        headers: {
+          'Authorization': `Bearer ${this.secretKey}`,
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/plain, */*',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Content-Type': 'application/json',
+          'Referer': 'https://dashboard.palmkash.com/',
+          'Origin': 'https://dashboard.palmkash.com'
+        }
       });
 
       return {
@@ -107,6 +111,15 @@ class PalmKashService {
         app_id: this.clientId,
         app_secret: this.secretKey,
         reference: transactionId
+      }, {
+        headers: {
+          'Authorization': `Bearer ${this.secretKey}`,
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/plain, */*',
+          'Content-Type': 'application/json',
+          'Referer': 'https://dashboard.palmkash.com/',
+          'Origin': 'https://dashboard.palmkash.com'
+        }
       });
       return response.data; // { status: 'SUCCESS' | 'FAILED' | 'PENDING', ... }
     } catch (error: any) {

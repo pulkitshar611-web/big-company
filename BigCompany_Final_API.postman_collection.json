@@ -8,7 +8,7 @@
       "name": "External - PalmKash Gateway",
       "item": [
         {
-          "name": "POST /payments/make-payment",
+          "name": "POST /v1/payments",
           "request": {
             "method": "POST",
             "header": [
@@ -18,17 +18,16 @@
               }
             ],
             "url": {
-              "raw": "https://testdashboard.palmkash.com/api/payments/make-payment",
+              "raw": "https://api.palmkash.com/v1/payments",
               "protocol": "https",
               "host": [
-                "testdashboard",
+                "api",
                 "palmkash",
                 "com"
               ],
               "path": [
-                "api",
-                "payments",
-                "make-payment"
+                "v1",
+                "payments"
               ]
             },
             "body": {
@@ -44,7 +43,7 @@
           "response": []
         },
         {
-          "name": "POST /payments/get-payment-status",
+          "name": "POST /v1/payments/status",
           "request": {
             "method": "POST",
             "header": [
@@ -54,17 +53,17 @@
               }
             ],
             "url": {
-              "raw": "https://testdashboard.palmkash.com/api/payments/get-payment-status",
+              "raw": "https://api.palmkash.com/v1/payments/status",
               "protocol": "https",
               "host": [
-                "testdashboard",
+                "api",
                 "palmkash",
                 "com"
               ],
               "path": [
-                "api",
+                "v1",
                 "payments",
-                "get-payment-status"
+                "status"
               ]
             },
             "body": {
