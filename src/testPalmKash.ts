@@ -43,6 +43,9 @@ async function runTest() {
     if (error.response) {
       console.error(`Status: ${error.response.status}`);
       console.error('Data:', JSON.stringify(error.response.data, null, 2));
+      if (typeof error.response.data === 'string' && error.response.data.includes('Cloudflare')) {
+        console.error('🛑 [Cloudflare Block Detected]');
+      }
     } else {
       console.error(error.message);
     }

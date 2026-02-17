@@ -11,7 +11,7 @@ class PalmKashService {
     this.clientId = process.env.PALMKASH_CLIENT_ID || '';
     this.secretKey = process.env.PALMKASH_SECRET_KEY || '';
     this.env = process.env.PALMKASH_ENV || 'sandbox';
-    this.baseUrl = process.env.PALMKASH_API_URL || 'https://testdashboard.palmkash.com/api';
+    this.baseUrl = process.env.PALMKASH_API_URL || 'https://dashboard.palmkash.com/api/v1';
   }
 
   /**
