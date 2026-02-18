@@ -13,6 +13,7 @@ import rewardsRoutes from './routes/rewardsRoutes';
 import debugRoutes, { setAppInstance } from './routes/debugRoutes';
 import trainingRoutes from './routes/trainingRoutes';
 import webhookRoutes from './routes/webhookRoutes';
+import ipDebugRoutes from './routes/ipDebugRoutes';
 console.log('--- Server Starting ---');
 
 dotenv.config();
@@ -86,6 +87,7 @@ app.use('/nfc', nfcRoutes);
 app.use('/wallet', walletRoutes);
 app.use('/rewards', rewardsRoutes);
 app.use('/api/webhooks', webhookRoutes);
+app.use('/api/debug', ipDebugRoutes); // Temporary IP debug endpoint
 app.use('/debug', debugRoutes); // Public debug endpoint
 setAppInstance(app); // Enable route listing in debug
 
