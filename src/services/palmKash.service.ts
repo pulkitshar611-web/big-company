@@ -112,7 +112,7 @@ class PalmKashService {
         console.error('❌ [PalmKash] Received non-JSON response (likely Cloudflare block)');
         return {
           success: false,
-          error: "PalmKash blocked request — server/IP not yet trusted",
+          error: "PalmKash blocked request — server/IP not trusted yet",
           status: "FAILED"
         };
       }
@@ -140,7 +140,7 @@ class PalmKashService {
       if (error.response && !contentType.includes('application/json')) {
         return {
           success: false,
-          error: "PalmKash blocked request — server/IP not yet trusted",
+          error: "PalmKash blocked request — server/IP not trusted yet",
           status: "FAILED"
         };
       }
