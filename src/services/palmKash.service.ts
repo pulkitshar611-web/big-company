@@ -67,22 +67,44 @@ class PalmKashService {
 
       // Official Endpoint
       const url = "https://dashboard.palmkash.com/api/v1/payments/make-payment";
-      
-      const response = await axios.post(url, {
+      const callback_url = "https://big-company-production.up.railway.app/api/webhooks/palmkash";
+      const requestBody = {
         merchant_id: process.env.PALMKASH_CLIENT_ID,
         client_reference: params.referenceId,
         phone_number: phone,
         amount: params.amount,
         currency: "RWF",
-        callback_url: params.callbackUrl || `${process.env.BACKEND_URL}/api/webhooks/palmkash`
-      }, {
-        headers: {
-          'Authorization': `Bearer ${process.env.PALMKASH_SECRET_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        // We want to catch the error ourselves to check headers
+        callback_url: callback_url
+      };
+
+      const requestHeaders = {
+        'Authorization': `Bearer ${process.env.PALMKASH_SECRET_KEY}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0'
+      };
+
+      // DEBUG LOGS BEFORE REQUEST
+      console.log('--- [PalmKash PRE-REQUEST DEBUG] ---');
+      console.log('URL:', url);
+      console.log('Headers:', JSON.stringify(requestHeaders, null, 2));
+      console.log('Body:', JSON.stringify(requestBody, null, 2));
+      console.log('Callback URL:', callback_url);
+      console.log('------------------------------------');
+      
+      const response = await axios.post(url, requestBody, {
+        headers: requestHeaders,
+        timeout: 15000,
+        maxRedirects: 5,
         validateStatus: (status) => status < 500 
       });
+
+      // DEBUG LOGS AFTER RESPONSE
+      console.log('--- [PalmKash POST-RESPONSE DEBUG] ---');
+      console.log('Status Code:', response.status);
+      console.log('Response Headers:', JSON.stringify(response.headers, null, 2));
+      console.log('Content-Type:', response.headers['content-type']);
+      console.log('-------------------------------------');
 
       // Check for Cloudflare/Non-JSON response
       const contentType = response.headers['content-type'] || '';
@@ -90,7 +112,7 @@ class PalmKashService {
         console.error('❌ [PalmKash] Received non-JSON response (likely Cloudflare block)');
         return {
           success: false,
-          error: "PalmKash blocked request (Cloudflare protection)",
+          error: "PalmKash blocked request — server/IP not yet trusted",
           status: "FAILED"
         };
       }
@@ -118,7 +140,7 @@ class PalmKashService {
       if (error.response && !contentType.includes('application/json')) {
         return {
           success: false,
-          error: "PalmKash blocked request (Cloudflare protection)",
+          error: "PalmKash blocked request — server/IP not yet trusted",
           status: "FAILED"
         };
       }
