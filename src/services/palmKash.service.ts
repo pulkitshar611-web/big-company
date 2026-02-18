@@ -65,39 +65,69 @@ class PalmKashService {
 
       console.log(`🚀 [PalmKash] Initiating payment for ${phone}, Amount: ${params.amount}`);
 
-      // Updated Endpoint: /payments/make-payment
-      const response = await axios.post(`${this.baseUrl}/payments/make-payment`, {
-        app_id: this.clientId,
-        app_secret: this.secretKey, 
+      // Official Endpoint
+      const url = "https://dashboard.palmkash.com/api/v1/payments/make-payment";
+      
+      const response = await axios.post(url, {
+        merchant_id: process.env.PALMKASH_CLIENT_ID,
+        client_reference: params.referenceId,
+        phone_number: phone,
         amount: params.amount,
-        phone_number: phone, 
-        reference: params.referenceId,
-        description: params.description,
+        currency: "RWF",
         callback_url: params.callbackUrl || `${process.env.BACKEND_URL}/api/webhooks/palmkash`
       }, {
         headers: {
-          'Authorization': `Bearer ${this.secretKey}`,
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'application/json, text/plain, */*',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Content-Type': 'application/json',
-          'Referer': 'https://dashboard.palmkash.com/',
-          'Origin': 'https://dashboard.palmkash.com'
-        }
+          'Authorization': `Bearer ${process.env.PALMKASH_SECRET_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        // We want to catch the error ourselves to check headers
+        validateStatus: (status) => status < 500 
       });
+
+      // Check for Cloudflare/Non-JSON response
+      const contentType = response.headers['content-type'] || '';
+      if (!contentType.includes('application/json')) {
+        console.error('❌ [PalmKash] Received non-JSON response (likely Cloudflare block)');
+        return {
+          success: false,
+          error: "PalmKash blocked request (Cloudflare protection)",
+          status: "FAILED"
+        };
+      }
+
+      if (response.status >= 400) {
+        return {
+          success: false,
+          error: response.data.error || response.data.message || 'Payment initiation failed',
+          status: "FAILED",
+          transactionId: params.referenceId
+        };
+      }
 
       return {
         success: true,
-        transactionId: response.data.transaction_id || response.data.reference,
-        status: response.data.status, 
+        transactionId: response.data.reference || response.data.transaction_id,
+        status: response.data.status || 'pending', 
         message: response.data.message || 'Payment initiated'
       };
     } catch (error: any) {
       console.error('PalmKash Payment Error:', error.response?.data || error.message);
+      
+      // If we still get a 500 or network error that wasn't caught by validateStatus
+      const contentType = error.response?.headers?.['content-type'] || '';
+      if (error.response && !contentType.includes('application/json')) {
+        return {
+          success: false,
+          error: "PalmKash blocked request (Cloudflare protection)",
+          status: "FAILED"
+        };
+      }
+
       return {
         success: false,
         error: error.response?.data?.message || error.message || 'PalmKash connection failed',
-        rawError: error.response?.data
+        status: "FAILED",
+        transactionId: params.referenceId
       };
     }
   }
@@ -110,16 +140,12 @@ class PalmKashService {
     try {
       const response = await axios.post(`${this.baseUrl}/payments/get-payment-status`, {
         app_id: this.clientId,
-        app_secret: this.secretKey,
+        app_secret: this.secretKey, 
         reference: transactionId
       }, {
         headers: {
           'Authorization': `Bearer ${this.secretKey}`,
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'application/json, text/plain, */*',
-          'Content-Type': 'application/json',
-          'Referer': 'https://dashboard.palmkash.com/',
-          'Origin': 'https://dashboard.palmkash.com'
+          'Content-Type': 'application/json'
         }
       });
       return response.data; // { status: 'SUCCESS' | 'FAILED' | 'PENDING', ... }
