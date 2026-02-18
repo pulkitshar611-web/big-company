@@ -96,7 +96,8 @@ class PalmKashService {
       console.error('PalmKash Payment Error:', error.response?.data || error.message);
       return {
         success: false,
-        error: error.response?.data?.message || error.message || 'PalmKash connection failed'
+        error: error.response?.data?.message || error.message || 'PalmKash connection failed',
+        rawError: error.response?.data
       };
     }
   }
