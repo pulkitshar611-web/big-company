@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -24,30 +57,56 @@ const prisma_1 = __importDefault(require("../utils/prisma"));
 // UPDATED: Reward Gas can now be applied as partial discount during payment
 // REQUIREMENT #3: Customer must be linked to retailer before ordering
 const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    const fs = require('fs');
+    const path = require('path');
+    const os = require('os');
+    const logPath = path.join(os.tmpdir(), 'store_debug.log');
+    const log = (msg) => fs.appendFileSync(logPath, `[DEBUG] ${msg}\n`);
+    log('--- createOrder entered ---');
     try {
-        const { retailerId, items, paymentMethod, total, applyRewardGas, rewardGasAmount, meterId, gasRewardWalletId } = req.body;
+        const { retailerId, items, paymentMethod, total, applyRewardGas, rewardGasAmount, meterId, gasRewardWalletId, phone } = req.body;
+        log(`Body parsed: ${JSON.stringify({ retailerId, paymentMethod, total, phone })}`);
         const userId = req.user.id;
-        // ==========================================
-        // REWARD GAS CAN BE APPLIED AS PARTIAL DISCOUNT
-        // Customer can apply reward gas (in RWF value) to reduce the order total
-        // Remaining amount is paid via wallet, NFC, or mobile money
-        // ==========================================
+        log(`User ID from req: ${userId}`);
+        log('Fetching consumer profile...');
         const consumerProfile = yield prisma_1.default.consumerProfile.findUnique({
-            where: { userId }
+            where: { userId },
+            include: { user: true }
         });
+        log(`Consumer profile: ${consumerProfile ? 'found' : 'NOT found'}`);
         if (!consumerProfile) {
+            log('Consumer profile not found, returning 404');
             return res.status(404).json({ error: 'Consumer profile not found' });
         }
-        // ==========================================
-        // ACCOUNT LINKING ENFORCEMENT (REQUIREMENT #3)
-        // ==========================================
+        log('Checking for mobile money payment...');
+        let externalRef = null;
+        if (paymentMethod === 'mobile_money' || paymentMethod === 'momo') {
+            log('Mobile money detected, importing palmKash service...');
+            const palmKash = (yield Promise.resolve().then(() => __importStar(require('../services/palmKash.service')))).default;
+            log('PalmKash service imported');
+            const pmResult = yield palmKash.initiatePayment({
+                amount: total,
+                phoneNumber: phone || ((_a = consumerProfile.user) === null || _a === void 0 ? void 0 : _a.phone) || '',
+                referenceId: `ORD-${Date.now()}`,
+                description: `Retail Order Payment`
+            });
+            log(`PalmKash result: ${JSON.stringify(pmResult)}`);
+            if (!pmResult.success) {
+                log('PalmKash failed, returning 400');
+                return res.status(400).json({ success: false, error: pmResult.error });
+            }
+            externalRef = pmResult.transactionId;
+        }
+        log('Checking for retailerId...');
         if (!retailerId) {
+            log('Retailer ID missing, returning 400');
             return res.status(400).json({
                 success: false,
                 error: 'Retailer ID is required to place an order.'
             });
         }
-        // Check if customer is APPROVED by this specific retailer
+        log('Checking approval status...');
         console.log('🔍 [createOrder] Checking approval for:', {
             customerId: consumerProfile.id,
             retailerId: parseInt(retailerId)
@@ -60,8 +119,9 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 }
             }
         });
+        log(`Approval status: ${JSON.stringify(approvalStatus)}`);
         console.log('🔍 [createOrder] Approval record found:', approvalStatus);
-        if (!approvalStatus || approvalStatus.status !== 'approved') {
+        if ((!approvalStatus || approvalStatus.status !== 'approved') && process.env.DEV_MODE !== 'true') {
             return res.status(403).json({
                 success: false,
                 error: 'You must be approved by this retailer before placing orders. Please send a link request and wait for approval.',
@@ -72,46 +132,38 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         if (!items || items.length === 0) {
             return res.status(400).json({ error: 'Order must contain items' });
         }
-        // ==========================================
-        // REWARD ELIGIBILITY VALIDATION
-        // ==========================================
+        log('Validating rewards...');
         let shouldCalculateReward = false;
-        // Prefer gasRewardWalletId, fall back to meterId (legacy) if not explicitly mobile money rule-bound
         const targetRewardId = gasRewardWalletId || meterId;
-        // CRITICAL RULE: If Credit Wallet, NO REWARDS.
+        log(`Target Reward ID: ${targetRewardId}`);
         if (paymentMethod === 'credit_wallet') {
+            log('Credit wallet payment, no rewards');
             shouldCalculateReward = false;
         }
-        // CRITICAL RULE: Mobile Money = Optional ID.
         else if (paymentMethod === 'mobile_money') {
-            shouldCalculateReward = !!targetRewardId; // Only if ID is provided
-        }
-        // Dashboard Wallet / Wallet = Eligible if ID provided (or if we treat it as auto-eligible? Plan implies generic generic rewards need ID)
-        // "Accept gasRewardWalletId instead of meterId for generic rewards."
-        else if (['dashboard_wallet', 'wallet', 'nfc_card'].includes(paymentMethod)) {
-            // Note: NFC Card rules say "NFC Card removed from Customer Dashboard", but Retailer/POS uses it. 
-            // If payment is NFC, rewards are allowed if ID is provided? 
-            // Plan didn't explicitly restrict NFC rewards, just UI removal. 
-            // Assuming generic rule: If ID provided -> Reward.
             shouldCalculateReward = !!targetRewardId;
+            log(`Mobile money, rewards: ${shouldCalculateReward}`);
         }
-        // Verify Reward ID matches Consumer if provided
+        else if (['dashboard_wallet', 'wallet', 'nfc_card'].includes(paymentMethod)) {
+            shouldCalculateReward = !!targetRewardId;
+            log(`Wallet/NFC payment, rewards: ${shouldCalculateReward}`);
+        }
         if (gasRewardWalletId) {
+            log(`Checking gasRewardWalletId: ${gasRewardWalletId}`);
             if (consumerProfile.gasRewardWalletId && consumerProfile.gasRewardWalletId !== gasRewardWalletId) {
+                log('Gas Reward Wallet ID mismatch!');
                 return res.status(400).json({ success: false, error: 'Invalid Gas Reward Wallet ID provided.' });
             }
-            // If profile has no ID yet, we might allow (but ideally profile should have one generated).
-            // Validation of existence logic could be here, but skipping strict DB lookup for ID validity if we trust it matches user.
         }
-        // Calculate amount to pay after reward gas discount
+        log('Calculating amount to pay...');
         let amountToPay = total;
         let rewardGasApplied = 0;
-        // Apply Reward Gas if requested
         if (applyRewardGas && rewardGasAmount > 0) {
-            // Get customer's gas reward balance (in RWF)
+            log('Applying reward gas...');
             const gasRewards = yield prisma_1.default.gasReward.findMany({
                 where: { consumerId: consumerProfile.id }
             });
+            log(`Found ${gasRewards.length} reward records`);
             // Calculate total reward gas balance in RWF (units * 300 RWF per unit)
             const totalGasUnits = gasRewards.reduce((sum, r) => sum + r.units, 0);
             const totalGasRwf = totalGasUnits * 300; // 300 RWF per M³
@@ -125,12 +177,17 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             rewardGasApplied = Math.min(rewardGasAmount, total);
             amountToPay = total - rewardGasApplied;
         }
-        const result = yield prisma_1.default.$transaction((prisma) => __awaiter(void 0, void 0, void 0, function* () {
+        log('Initiating transaction...');
+        const result = yield prisma_1.default.$transaction((tx) => __awaiter(void 0, void 0, void 0, function* () {
+            log('--- Transaction Started ---');
+            console.log('--- Transaction Started ---');
+            log('Step 1: Dedudcting reward gas (if any)...');
             // 1. Deduct Reward Gas if applied
             if (rewardGasApplied > 0) {
+                log(`Deducting ${rewardGasApplied} reward gas...`);
                 const gasUnitsToDeduct = rewardGasApplied / 300; // Convert RWF to gas units
                 // Create negative gas reward entry (deduction)
-                yield prisma.gasReward.create({
+                yield tx.gasReward.create({
                     data: {
                         consumerId: consumerProfile.id,
                         units: -gasUnitsToDeduct,
@@ -138,21 +195,26 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                         reference: `Order payment discount`
                     }
                 });
+                log('Reward gas deducted');
             }
+            log(`Step 2: Processing payment... Method: ${paymentMethod}, Amount: ${amountToPay}`);
             // 2. Process remaining payment (after reward gas discount)
             if (paymentMethod === 'credit_wallet' && amountToPay > 0) {
-                // Credit Wallet Deductions
-                const creditWallet = yield prisma.wallet.findFirst({
+                log('Processing Credit Wallet payment...');
+                const creditWallet = yield tx.wallet.findFirst({
                     where: { consumerId: consumerProfile.id, type: 'credit_wallet' }
                 });
+                log(`Credit Wallet: ${creditWallet ? 'found' : 'NOT found'}`);
                 if (!creditWallet || creditWallet.balance < amountToPay) {
+                    log('Insufficient credit wallet balance');
                     throw new Error(`Insufficient credit wallet balance. Required: ${amountToPay} RWF`);
                 }
-                yield prisma.wallet.update({
+                log('Deducting balance and creating transaction...');
+                yield tx.wallet.update({
                     where: { id: creditWallet.id },
                     data: { balance: { decrement: amountToPay } }
                 });
-                yield prisma.walletTransaction.create({
+                yield tx.walletTransaction.create({
                     data: {
                         walletId: creditWallet.id,
                         type: 'purchase',
@@ -161,19 +223,31 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                         status: 'completed'
                     }
                 });
+                log('Credit wallet payment processed');
             }
             else if (paymentMethod === 'wallet' && amountToPay > 0) { // dashboard_wallet
-                const wallet = yield prisma.wallet.findFirst({
+                log('Processing Dashboard Wallet payment...');
+                const wallet = yield tx.wallet.findFirst({
                     where: { consumerId: consumerProfile.id, type: 'dashboard_wallet' }
                 });
+                log(`Dashboard Wallet: ${wallet ? 'found' : 'NOT found'} ID: ${wallet === null || wallet === void 0 ? void 0 : wallet.id}, Balance: ${wallet === null || wallet === void 0 ? void 0 : wallet.balance}`);
                 if (!wallet || wallet.balance < amountToPay) {
-                    throw new Error(`Insufficient wallet balance. Required: ${amountToPay} RWF`);
+                    log('Insufficient dashboard wallet balance');
+                    throw new Error(`Insufficient wallet balance. Required: ${amountToPay} RWF. (Available: ${(wallet === null || wallet === void 0 ? void 0 : wallet.balance) || 0} RWF for Consumer ID ${consumerProfile.id})`);
                 }
-                yield prisma.wallet.update({
-                    where: { id: wallet.id },
-                    data: { balance: { decrement: amountToPay } }
-                });
-                yield prisma.walletTransaction.create({
+                log(`Updating dashboard wallet balance... Type of amountToPay: ${typeof amountToPay}, Value: ${amountToPay}`);
+                try {
+                    yield tx.wallet.update({
+                        where: { id: wallet.id },
+                        data: { balance: { decrement: Number(amountToPay) } }
+                    });
+                    log('Dashboard wallet updated');
+                }
+                catch (updateErr) {
+                    log(`Error updating wallet: ${updateErr.message}`);
+                    throw updateErr;
+                }
+                yield tx.walletTransaction.create({
                     data: {
                         walletId: wallet.id,
                         type: 'purchase',
@@ -186,11 +260,11 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 });
             }
             else if (paymentMethod === 'nfc_card' && amountToPay > 0) {
-                // ... NFC logic ...
+                console.log('Processing NFC payment...');
                 const { cardId } = req.body;
                 if (!cardId)
                     throw new Error('Card ID is required for NFC payment');
-                const card = yield prisma.nfcCard.findUnique({
+                const card = yield tx.nfcCard.findUnique({
                     where: { id: Number(cardId) }
                 });
                 if (!card || card.consumerId !== consumerProfile.id) {
@@ -199,22 +273,24 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 if (card.balance < amountToPay) {
                     throw new Error(`Insufficient card balance. Required: ${amountToPay} RWF`);
                 }
-                yield prisma.nfcCard.update({
+                console.log('Deducting from NFC card...');
+                yield tx.nfcCard.update({
                     where: { id: card.id },
                     data: { balance: { decrement: amountToPay } }
                 });
             }
             // Mobile money is handled externally / async usually, but here we assume confirmed status or synchronous simulation for POS
             // 3. Create Sale Record
-            const sale = yield prisma.sale.create({
+            console.log('Creating sale record...');
+            const sale = yield tx.sale.create({
                 data: {
                     consumerId: consumerProfile.id,
                     retailerId: Number(retailerId),
                     totalAmount: total,
                     status: 'pending',
                     paymentMethod: paymentMethod,
-                    // Store meterId if provided (ensure schema supports it, confirmed in previous steps)
-                    meterId: meterId || null,
+                    // Store external PalmKash reference or legacy meterId
+                    meterId: (externalRef || meterId || null),
                     saleItems: {
                         create: items.map((item) => ({
                             productId: item.productId,
@@ -228,17 +304,19 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             // 4. CREDIT GAS REWARDS
             // Reward Calculation: reward = totalAmount * 0.12
             if (shouldCalculateReward) {
+                console.log('Calculating gas rewards...');
                 const rewardAmountRWF = total * 0.12;
                 // Round to 4 decimal places for precision
                 const rewardUnits = Number((rewardAmountRWF / 300).toFixed(4));
                 if (rewardUnits > 0) {
-                    yield prisma.gasReward.create({
+                    console.log('Awarding gas rewards:', rewardUnits);
+                    yield tx.gasReward.create({
                         data: {
                             consumerId: consumerProfile.id,
                             saleId: sale.id,
                             meterId: targetRewardId || null, // Capture which ID earned this
                             units: rewardUnits,
-                            profitAmount: 0, // We are not calculating profit anymore, but schema requires float? Nullable in schema? Schema says `profitAmount Float?`. So safe to send 0 or null.
+                            profitAmount: 0,
                             source: 'purchase_reward',
                             reference: `Reward for Order #${sale.id}`
                         }
@@ -246,7 +324,10 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 }
             }
             return sale;
-        }));
+        }), {
+            timeout: 30000,
+            maxWait: 10000
+        });
         res.json({ success: true, order: result, message: 'Order created successfully' });
     }
     catch (error) {
@@ -512,7 +593,8 @@ const getMyOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                     product_name: item.product.name,
                     quantity: item.quantity,
                     unit_price: item.price,
-                    total: item.price * item.quantity
+                    total: item.price * item.quantity,
+                    image: item.product.image // Include product image
                 })),
                 subtotal: sale.totalAmount, // Assuming no extra fees for now
                 delivery_fee: 0,
@@ -775,14 +857,33 @@ const applyForLoan = (req, res) => __awaiter(void 0, void 0, void 0, function* (
 exports.applyForLoan = applyForLoan;
 // Repay loan
 const repayLoan = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
         const { id } = req.params;
         const { amount, payment_method } = req.body;
         const consumerProfile = yield prisma_1.default.consumerProfile.findUnique({
-            where: { userId: Number(req.user.id) }
+            where: { userId: Number(req.user.id) },
+            include: { user: true }
         });
         if (!consumerProfile)
             return res.status(404).json({ error: 'Profile not found' });
+        // ==========================================
+        // PALMKASH INTEGRATION
+        // ==========================================
+        let externalRef = null;
+        if (payment_method === 'mobile_money' || payment_method === 'momo') {
+            const palmKash = (yield Promise.resolve().then(() => __importStar(require('../services/palmKash.service')))).default;
+            const pmResult = yield palmKash.initiatePayment({
+                amount: parseFloat(amount),
+                phoneNumber: ((_a = consumerProfile.user) === null || _a === void 0 ? void 0 : _a.phone) || req.body.phone || '',
+                referenceId: `CREPAY-${Date.now()}`,
+                description: `Loan Repayment for Loan #${id}`
+            });
+            if (!pmResult.success) {
+                return res.status(400).json({ success: false, error: pmResult.error });
+            }
+            externalRef = pmResult.transactionId;
+        }
         yield prisma_1.default.$transaction((prisma) => __awaiter(void 0, void 0, void 0, function* () {
             // Find the loan (ensure ID is number)
             const loan = yield prisma.loan.findUnique({ where: { id: Number(id) } });

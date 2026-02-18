@@ -15,6 +15,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.linkRetailerToWholesaler = exports.getRetailerWholesalerLinkage = exports.getWholesalerAccountDetails = exports.getWorkerAccountDetails = exports.getRetailerAccountDetails = exports.getCustomerAccountDetails = exports.updateSystemConfig = exports.getSystemConfig = exports.getRevenueReport = exports.getTransactionReport = exports.unlinkNFCCard = exports.activateNFCCard = exports.blockNFCCard = exports.registerNFCCard = exports.rejectLoan = exports.approveLoan = exports.deleteEmployee = exports.updateEmployee = exports.createEmployee = exports.getEmployees = exports.deleteProduct = exports.updateProduct = exports.createProduct = exports.getProducts = exports.deleteCustomer = exports.updateCustomerStatus = exports.updateCustomer = exports.updateWholesalerStatus = exports.updateRetailerStatus = exports.deleteWholesaler = exports.updateWholesaler = exports.verifyWholesaler = exports.verifyRetailer = exports.deleteRetailer = exports.updateRetailer = exports.deleteCategory = exports.updateCategory = exports.createCategory = exports.getCategories = exports.getNFCCards = exports.getLoans = exports.createWholesaler = exports.getWholesalers = exports.createRetailer = exports.getRetailers = exports.createCustomer = exports.getCustomer = exports.getCustomers = exports.getReports = exports.getDashboard = void 0;
 exports.deleteSettlementInvoice = exports.updateSettlementInvoice = exports.getSettlementInvoice = exports.createSettlementInvoice = exports.getSettlementInvoices = exports.unlinkRetailerFromWholesaler = void 0;
 const prisma_1 = __importDefault(require("../utils/prisma"));
+const cloudinary_1 = require("../utils/cloudinary");
 const auth_1 = require("../utils/auth");
 // Get detailed dashboard stats
 const getDashboard = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
@@ -1117,7 +1118,12 @@ exports.getProducts = getProducts;
 // Create product
 const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { name, description, sku, category, price, costPrice, retailerPrice, stock, unit, lowStockThreshold, invoiceNumber, barcode, wholesalerId, retailerId } = req.body;
+        const { name, description, sku, category, price, costPrice, retailerPrice, stock, unit, lowStockThreshold, invoiceNumber, barcode, wholesalerId, retailerId, image } = req.body;
+        // Upload to Cloudinary if image is provided as base64
+        let imageUrl = image;
+        if (image && image.startsWith('data:image')) {
+            imageUrl = yield (0, cloudinary_1.uploadImage)(image);
+        }
         const product = yield prisma_1.default.product.create({
             data: {
                 name,
@@ -1134,6 +1140,7 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 barcode,
                 wholesalerId,
                 retailerId,
+                image: imageUrl,
                 status: 'active'
             }
         });
@@ -1149,7 +1156,12 @@ exports.createProduct = createProduct;
 const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { id } = req.params;
-        const { name, description, sku, category, price, costPrice, retailerPrice, stock, unit, lowStockThreshold, invoiceNumber, barcode, status } = req.body;
+        const { name, description, sku, category, price, costPrice, retailerPrice, stock, unit, lowStockThreshold, invoiceNumber, barcode, status, image } = req.body;
+        // Upload to Cloudinary if new image is provided as base64
+        let imageUrl = image;
+        if (image && image.startsWith('data:image')) {
+            imageUrl = yield (0, cloudinary_1.uploadImage)(image);
+        }
         const product = yield prisma_1.default.product.update({
             where: { id: Number(id) },
             data: {
@@ -1165,7 +1177,8 @@ const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 lowStockThreshold: lowStockThreshold !== undefined ? (lowStockThreshold ? parseInt(lowStockThreshold) : null) : undefined,
                 invoiceNumber,
                 barcode,
-                status
+                status,
+                image: imageUrl
             }
         });
         res.json({ success: true, product });

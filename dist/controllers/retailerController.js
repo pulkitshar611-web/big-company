@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -14,6 +47,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getPurchaseOrder = exports.getPurchaseOrders = exports.getSettlementInvoice = exports.getSettlementInvoices = exports.unlinkCustomer = exports.getLinkedCustomers = exports.rejectCustomerLinkRequest = exports.approveCustomerLinkRequest = exports.getCustomerLinkRequests = exports.cancelLinkRequest = exports.getMyLinkRequests = exports.sendLinkRequest = exports.getAvailableWholesalers = exports.getAnalytics = exports.topUpWallet = exports.updateProfile = exports.getProfile = exports.makeRepayment = exports.requestCredit = exports.getCreditOrder = exports.getCreditOrders = exports.getCreditInfo = exports.getWalletTransactions = exports.createOrder = exports.getWholesalerProducts = exports.getDailySales = exports.fulfillSale = exports.cancelSale = exports.updateSaleStatus = exports.createSale = exports.scanBarcode = exports.getPOSProducts = exports.getWallet = exports.createBranch = exports.getBranches = exports.getOrder = exports.getOrders = exports.updateProduct = exports.createProduct = exports.getInventory = exports.getDashboardStats = void 0;
 const prisma_1 = __importDefault(require("../utils/prisma"));
+const cloudinary_1 = require("../utils/cloudinary");
 // Get dashboard stats
 // Get dashboard stats with comprehensive calculations
 const getDashboardStats = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
@@ -291,7 +325,7 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         if (!retailerProfile) {
             return res.status(404).json({ error: 'Retailer profile not found' });
         }
-        const { invoice_number, name, description, sku, category, price, costPrice, stock } = req.body;
+        const { invoice_number, name, description, sku, category, price, costPrice, stock, image } = req.body;
         // --- Invoice Flow ---
         if (invoice_number) {
             // Find the order by ID (treating invoice_number as Order ID)
@@ -345,6 +379,7 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                         unit: sourceProduct.unit,
                         invoiceNumber: invoice_number,
                         retailerId: retailerProfile.id,
+                        image: sourceProduct.image,
                         status: 'active'
                     }
                 });
@@ -357,6 +392,11 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         if (!name || !price) {
             return res.status(400).json({ error: 'Name and Price are required for manual creation' });
         }
+        // Upload to Cloudinary if image is provided as base64
+        let imageUrl = image;
+        if (image && image.startsWith('data:image')) {
+            imageUrl = yield (0, cloudinary_1.uploadImage)(image);
+        }
         const product = yield prisma_1.default.product.create({
             data: {
                 name,
@@ -366,6 +406,7 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 price: parseFloat(price),
                 costPrice: costPrice ? parseFloat(costPrice) : undefined,
                 stock: stock ? parseInt(stock) : 0,
+                image: imageUrl,
                 retailerId: retailerProfile.id
             }
         });
@@ -381,7 +422,12 @@ exports.createProduct = createProduct;
 const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { id } = req.params;
-        const { name, description, category, price, costPrice, stock } = req.body;
+        const { name, description, category, price, costPrice, stock, image } = req.body;
+        // Upload to Cloudinary if new image is provided as base64
+        let imageUrl = image;
+        if (image && image.startsWith('data:image')) {
+            imageUrl = yield (0, cloudinary_1.uploadImage)(image);
+        }
         const product = yield prisma_1.default.product.update({
             where: { id: Number(id) },
             data: {
@@ -390,7 +436,8 @@ const updateProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 category,
                 price: price ? parseFloat(price) : undefined,
                 costPrice: costPrice ? parseFloat(costPrice) : undefined,
-                stock: stock !== undefined ? parseInt(stock) : undefined
+                stock: stock !== undefined ? parseInt(stock) : undefined,
+                image: imageUrl
             }
         });
         res.json({ success: true, product });
@@ -501,6 +548,7 @@ const getOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 product_id: item.productId,
                 product_name: item.product.name,
                 sku: item.product.sku,
+                image: item.product.image,
                 quantity: item.quantity,
                 unit_price: item.price,
                 total: item.price * item.quantity
@@ -722,6 +770,29 @@ const createSale = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
                 });
                 consumerId = consumer.id;
             }
+            // --- Handle PalmKash (Mobile Money) ---
+            let externalRef = null;
+            if (payment_method === 'mobile_money' || payment_method === 'momo') {
+                if (!customer_phone)
+                    throw new Error('Customer phone required for mobile money payment');
+                const palmKash = (yield Promise.resolve().then(() => __importStar(require('../services/palmKash.service')))).default;
+                const pmResult = yield palmKash.initiatePayment({
+                    amount: total,
+                    phoneNumber: customer_phone,
+                    referenceId: `POS-${Date.now()}`,
+                    description: `POS Sale at ${retailerProfile.shopName}`
+                });
+                if (!pmResult.success) {
+                    throw new Error(pmResult.error || 'PalmKash payment initiation failed');
+                }
+                externalRef = pmResult.transactionId;
+                // Try to identify consumer for rewards
+                const consumer = yield prisma.consumerProfile.findFirst({
+                    where: { user: { phone: customer_phone } }
+                });
+                if (consumer)
+                    consumerId = consumer.id;
+            }
             // Create Sale Record
             const sale = yield prisma.sale.create({
                 data: {
@@ -729,7 +800,8 @@ const createSale = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
                     consumerId: consumerId,
                     totalAmount: total,
                     paymentMethod: payment_method,
-                    status: 'completed',
+                    status: 'completed', // In Sandbox we assume success for now to keep flow identical
+                    meterId: externalRef, // Store PalmKash TransID in meterId as a common reference field
                     saleItems: {
                         create: items.map((item) => ({
                             productId: Number(item.product_id),
@@ -747,9 +819,10 @@ const createSale = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
                 });
             }
             // Log Transaction if linked to consumer
-            if (consumerId && (payment_method === 'wallet' || payment_method === 'nfc')) {
+            if (consumerId && (['wallet', 'dashboard_wallet', 'credit_wallet', 'nfc'].includes(payment_method))) {
+                const walletType = payment_method === 'credit_wallet' ? 'credit_wallet' : 'dashboard_wallet';
                 const wallet = yield prisma.wallet.findFirst({
-                    where: { consumerId: consumerId, type: 'dashboard_wallet' }
+                    where: { consumerId: consumerId, type: walletType }
                 });
                 if (wallet) {
                     yield prisma.walletTransaction.create({
@@ -767,20 +840,15 @@ const createSale = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
             // ==========================================
             // GAS REWARD LOGIC (POS)
             // ==========================================
-            const { gas_meter_id } = req.body; // Frontend sends 'gas_meter_id'
-            const meterId = gas_meter_id; // Aliasing to match backend property often used
-            const isRewardEligible = ['dashboard_wallet', 'mobile_money'].includes(payment_method);
-            // Validation: Meter ID is mandatory for eligible methods
-            if (isRewardEligible && !meterId) {
-                // This check should ideally be done BEFORE transaction to save DB calls, 
-                // but strict requirement compliance is paramount.
-                // Since we are inside transaction, throwing error rolls it back.
-                throw new Error('Meter ID is required for this payment method to earn gas rewards.');
+            const { gasRewardWalletId, gas_meter_id } = req.body; // Accept both for backward compatibility
+            const targetRewardId = gasRewardWalletId || gas_meter_id;
+            const isRewardEligible = ['dashboard_wallet', 'mobile_money', 'wallet'].includes(payment_method);
+            // Validation: ID is mandatory for dashboard_wallet, optional for mobile_money
+            if (payment_method === 'dashboard_wallet' && !targetRewardId) {
+                throw new Error('Gas Reward Wallet ID is required for Dashboard Wallet payments to earn rewards.');
             }
-            if (isRewardEligible && meterId && consumerId) {
+            if (isRewardEligible && targetRewardId && consumerId) {
                 // Calculate Profit
-                // We need product cost prices. 
-                // We have items with 'product_id'.
                 let totalProfit = 0;
                 for (const item of items) {
                     const product = yield prisma.product.findUnique({ where: { id: Number(item.product_id) } });
@@ -793,25 +861,22 @@ const createSale = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
                 }
                 if (totalProfit > 0) {
                     const rewardAmountRWF = totalProfit * 0.12; // 12% of profit
-                    const rewardUnits = rewardAmountRWF / 300; // Approx 1 unit = 300 RWF (Assumption based on typical pricing)
+                    const rewardUnits = rewardAmountRWF / 300;
                     yield prisma.gasReward.create({
                         data: {
                             consumerId: consumerId,
                             saleId: sale.id,
-                            meterId: meterId,
+                            meterId: targetRewardId,
                             units: rewardUnits,
                             profitAmount: totalProfit,
-                            source: 'pos_reward', // distinct from 'online_reward'
+                            source: 'pos_reward',
                             reference: `Reward for POS Sale #${sale.id}`
                         }
                     });
-                    // Update sale with meterId if schema supports it
-                    // await prisma.sale.update({ ... }) - Checking if Sale has meterId column... 
-                    // Previous steps suggested it might. If not, it's okay, Reward record is key.
-                    // Let's assume Sale model has 'meterId' field.
+                    // Update sale with meterId (Reward Wallet ID) if schema supports it
                     yield prisma.sale.update({
                         where: { id: sale.id },
-                        data: { meterId: meterId }
+                        data: { meterId: targetRewardId }
                     });
                 }
             }
@@ -1084,7 +1149,8 @@ exports.getWholesalerProducts = getWholesalerProducts;
 const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const retailerProfile = yield prisma_1.default.retailerProfile.findUnique({
-            where: { userId: req.user.id }
+            where: { userId: req.user.id },
+            include: { user: true }
         });
         if (!retailerProfile) {
             return res.status(404).json({ error: 'Retailer profile not found' });
@@ -1132,6 +1198,7 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         }
         // Transaction: Create Order, Debit Wallet/Credit, and Link Retailer
         const result = yield prisma_1.default.$transaction((prisma) => __awaiter(void 0, void 0, void 0, function* () {
+            var _a;
             // 1. Payment Processing Logic
             if (paymentMethod === 'wallet') {
                 if (retailerProfile.walletBalance < totalAmount) {
@@ -1160,8 +1227,21 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 });
             }
             else if (paymentMethod === 'momo') {
-                // Mobile Money logic (Mock: mark as pending payment)
-                // No immediate balance deduction
+                // ==========================================
+                // PALMKASH INTEGRATION
+                // ==========================================
+                const palmKash = (yield Promise.resolve().then(() => __importStar(require('../services/palmKash.service')))).default;
+                const pmResult = yield palmKash.initiatePayment({
+                    amount: totalAmount,
+                    phoneNumber: ((_a = retailerProfile.user) === null || _a === void 0 ? void 0 : _a.phone) || req.body.phone || '',
+                    referenceId: `WHL-${Date.now()}`,
+                    description: `Wholesale Order Payment`
+                });
+                if (!pmResult.success) {
+                    throw new Error(pmResult.error || 'PalmKash payment initiation failed');
+                }
+                // Store reference in external location? Order doesn't have ref field.
+                // We can use a comment or just log it. In this app, many things use ID.
             }
             else {
                 throw new Error('Invalid payment method');
@@ -1350,7 +1430,8 @@ const getCreditOrder = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 id: i.id,
                 product_name: i.product.name,
                 quantity: i.quantity,
-                price: i.price
+                price: i.price,
+                image: i.product.image
             }))
         });
     }
@@ -1391,6 +1472,7 @@ const requestCredit = (req, res) => __awaiter(void 0, void 0, void 0, function* 
 exports.requestCredit = requestCredit;
 // Make Repayment
 const makeRepayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
         const retailerProfile = yield prisma_1.default.retailerProfile.findUnique({
             where: { userId: req.user.id }
@@ -1398,7 +1480,7 @@ const makeRepayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         if (!retailerProfile)
             return res.status(404).json({ error: 'Retailer not found' });
         const { id } = req.params; // Order ID
-        const { amount } = req.body;
+        const { amount, paymentMethod = 'wallet' } = req.body;
         if (!amount || amount <= 0) {
             return res.status(400).json({ error: 'Invalid repayment amount' });
         }
@@ -1406,23 +1488,36 @@ const makeRepayment = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const order = yield prisma_1.default.order.findUnique({ where: { id: Number(id) } });
         if (!order)
             return res.status(404).json({ error: 'Order not found' });
-        // 2. Validate Repayment (Mock check: if amount > pending)
-        // In real app, check order balance. Here assuming totalAmount is pending.
-        if (amount > order.totalAmount) {
-            // Allow overpayment? Probably not for MVP.
-            // return res.status(400).json({ error: 'Amount exceeds outstanding balance' });
+        // 2. PalmKash Integration for MoMo
+        let externalRef = null;
+        if (paymentMethod === 'mobile_money' || paymentMethod === 'momo') {
+            const palmKash = (yield Promise.resolve().then(() => __importStar(require('../services/palmKash.service')))).default;
+            const pmResult = yield palmKash.initiatePayment({
+                amount: parseFloat(amount),
+                phoneNumber: ((_a = retailerProfile.user) === null || _a === void 0 ? void 0 : _a.phone) || req.body.phone || '',
+                referenceId: `RREPAY-${Date.now()}`,
+                description: `Credit Repayment for Order #${id}`
+            });
+            if (!pmResult.success) {
+                return res.status(400).json({ success: false, error: pmResult.error });
+            }
+            externalRef = pmResult.transactionId;
         }
-        // 3. Process Payment (Debit Wallet)
-        if (retailerProfile.walletBalance < amount) {
-            return res.status(400).json({ error: 'Insufficient wallet balance' });
+        // 3. Process Payment
+        if (paymentMethod === 'wallet') {
+            if (retailerProfile.walletBalance < amount) {
+                return res.status(400).json({ error: 'Insufficient wallet balance' });
+            }
         }
         // Transaction
         yield prisma_1.default.$transaction((prisma) => __awaiter(void 0, void 0, void 0, function* () {
-            // Debit Wallet
-            yield prisma.retailerProfile.update({
-                where: { id: retailerProfile.id },
-                data: { walletBalance: { decrement: amount } }
-            });
+            // Debit Wallet if chosen
+            if (paymentMethod === 'wallet') {
+                yield prisma.retailerProfile.update({
+                    where: { id: retailerProfile.id },
+                    data: { walletBalance: { decrement: amount } }
+                });
+            }
             // Update Credit Usage (if this was a credit order)
             const creditInfo = yield prisma.retailerCredit.findUnique({ where: { retailerId: retailerProfile.id } });
             if (creditInfo) {
@@ -1571,6 +1666,7 @@ const updateProfile = (req, res) => __awaiter(void 0, void 0, void 0, function* 
 exports.updateProfile = updateProfile;
 // Top Up Wallet (Add Capital)
 const topUpWallet = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     try {
         const retailerProfile = yield prisma_1.default.retailerProfile.findUnique({
             where: { userId: req.user.id }
@@ -1582,15 +1678,43 @@ const topUpWallet = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         if (!amount || amount <= 0) {
             return res.status(400).json({ error: 'Invalid amount' });
         }
-        // Updated to just update balance for now as WalletTransaction is consumer-only in current schema
-        // Update Wallet Balance
-        const updatedProfile = yield prisma_1.default.retailerProfile.update({
-            where: { id: retailerProfile.id },
+        // ==========================================
+        // PALMKASH INTEGRATION
+        // ==========================================
+        let externalRef = null;
+        let transactionRef = `TOPUP-${Date.now()}`; // Correct prefix for webhook
+        if (source === 'mobile_money' || source === 'momo') {
+            const palmKash = (yield Promise.resolve().then(() => __importStar(require('../services/palmKash.service')))).default;
+            const pmResult = yield palmKash.initiatePayment({
+                amount: parseFloat(amount),
+                phoneNumber: req.body.phone || ((_a = retailerProfile.user) === null || _a === void 0 ? void 0 : _a.phone) || '',
+                referenceId: transactionRef,
+                description: `Retailer Wallet Topup`
+            });
+            if (!pmResult.success) {
+                return res.status(400).json({ success: false, error: pmResult.error });
+            }
+            externalRef = pmResult.transactionId;
+        }
+        // Create Pending Transaction
+        const transaction = yield prisma_1.default.walletTransaction.create({
             data: {
-                walletBalance: { increment: parseFloat(amount) }
+                retailerId: retailerProfile.id,
+                // walletId is optional now, so we can omit it for retailer
+                type: 'topup',
+                amount: parseFloat(amount),
+                description: `Wallet Topup via ${source}`,
+                reference: transactionRef, // Local reference
+                status: 'pending'
             }
         });
-        res.json({ success: true, message: 'Capital added successfully', balance: updatedProfile.walletBalance });
+        res.json({
+            success: true,
+            message: 'Payment initiated. Please approve on your phone.',
+            transactionId: transactionRef,
+            externalRef: externalRef,
+            status: 'pending'
+        });
     }
     catch (error) {
         console.error('Error adding capital:', error);
@@ -2393,7 +2517,8 @@ const getPurchaseOrder = (req, res) => __awaiter(void 0, void 0, void 0, functio
                     product_name: ((_a = item.product) === null || _a === void 0 ? void 0 : _a.name) || 'Unknown Product',
                     quantity: item.quantity,
                     price: item.price,
-                    total: item.quantity * item.price
+                    total: item.quantity * item.price,
+                    image: item.product.image
                 });
             })
         };

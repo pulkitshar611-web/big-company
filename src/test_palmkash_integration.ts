@@ -21,9 +21,6 @@ async function testPalmKash() {
       console.log('✅ Success! The IP whitelisting seems to have worked.');
     } else {
       console.log('❌ Failed. Error details:', result.error);
-      if (result.rawError) {
-        console.log('Raw Error Data:', JSON.stringify(result.rawError, null, 2));
-      }
     }
   } catch (error: any) {
     console.error('💥 Unexpected Error:', error.message);

@@ -37,10 +37,10 @@ const enforceReadOnly = (req, res, next) => {
         '/admin/gas-usage',
         '/admin/loans'
     ];
-    const isReadOnlyEndpoint = targetEndpoints.some(endpoint => fullPath.startsWith(endpoint));
+    // Allow loan approval and rejection even in read-only mode for demonstrations
+    const isExcludedFromReadOnly = fullPath.endsWith('/approve') || fullPath.endsWith('/reject');
+    const isReadOnlyEndpoint = targetEndpoints.some(endpoint => fullPath.startsWith(endpoint)) && !isExcludedFromReadOnly;
     const isWriteOperation = WRITE_METHODS.includes(req.method);
-    // Assuming role is attached to req.user by authMiddleware
-    // In adminController/auth flow, role is 'admin'.
     if (isReadOnlyEndpoint && isWriteOperation && ((_a = req.user) === null || _a === void 0 ? void 0 : _a.role) === 'admin') {
         return res.status(403).json({
             success: false,

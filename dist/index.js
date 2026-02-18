@@ -50,6 +50,8 @@ const walletRoutes_1 = __importDefault(require("./routes/walletRoutes"));
 const rewardsRoutes_1 = __importDefault(require("./routes/rewardsRoutes"));
 const debugRoutes_1 = __importStar(require("./routes/debugRoutes"));
 const trainingRoutes_1 = __importDefault(require("./routes/trainingRoutes"));
+const webhookRoutes_1 = __importDefault(require("./routes/webhookRoutes"));
+const ipDebugRoutes_1 = __importDefault(require("./routes/ipDebugRoutes"));
 console.log('--- Server Starting ---');
 dotenv_1.default.config();
 const app = (0, express_1.default)();
@@ -61,10 +63,13 @@ const allowedOrigins = [
     "http://localhost:5173",
     "http://localhost:9001",
     "http://localhost:9000",
+    "http://127.0.0.1:3062",
+    "http://127.0.0.1:5173",
     "http://127.0.0.1:9001",
     "https://big-company-frontend.vercel.app",
-    "https://big-company-production.up.railway.app",
-    "https://big-pos.netlify.app"
+    "https://big-pos-backend-production.up.railway.app",
+    "https://big-pos.netlify.app",
+    "https://bigpos.kiaantechnology.com"
 ];
 app.use((0, cors_1.default)({
     origin: function (origin, callback) {
@@ -86,10 +91,15 @@ app.use(express_1.default.urlencoded({ limit: '10mb', extended: true }));
 // Request Logger
 app.use((req, res, next) => {
     const timestamp = new Date().toISOString();
-    console.log(`[${timestamp}] ${req.method} ${req.url}`);
-    if (req.body && Object.keys(req.body).length > 0) {
-        console.log(`  Body: ${JSON.stringify(req.body)}`);
+    const logMsg = `[${timestamp}] ${req.method} ${req.url}\n${req.body && Object.keys(req.body).length > 0 ? `  Body: ${JSON.stringify(req.body)}\n` : ''}`;
+    console.log(logMsg);
+    try {
+        const fs = require('fs');
+        const path = require('path');
+        const os = require('os');
+        fs.appendFileSync(path.join(os.tmpdir(), 'backend_output.log'), logMsg);
     }
+    catch (e) { }
     next();
 });
 // Routes
@@ -107,6 +117,8 @@ app.use('/admin', adminRoutes_1.default);
 app.use('/nfc', nfcRoutes_1.default);
 app.use('/wallet', walletRoutes_1.default);
 app.use('/rewards', rewardsRoutes_1.default);
+app.use('/api/webhooks', webhookRoutes_1.default);
+app.use('/api/debug', ipDebugRoutes_1.default); // Temporary IP debug endpoint
 app.use('/debug', debugRoutes_1.default); // Public debug endpoint
 (0, debugRoutes_1.setAppInstance)(app); // Enable route listing in debug
 app.get('/', (req, res) => {
@@ -142,4 +154,29 @@ app.use((err, req, res, next) => {
 });
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
+});
+process.on('uncaughtException', (err) => {
+    console.error('CRITICAL UNCAUGHT EXCEPTION:', err);
+    // Log to file
+    try {
+        const fs = require('fs');
+        const path = require('path');
+        const logPath = path.join(__dirname, '../error.log');
+        const timestamp = new Date().toISOString();
+        fs.appendFileSync(logPath, `[${timestamp}] FATAL UNCAUGHT EXCEPTION: ${err.stack || err}\n`);
+    }
+    catch (e) { }
+    process.exit(1);
+});
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('CRITICAL UNHANDLED REJECTION:', reason);
+    // Log to file
+    try {
+        const fs = require('fs');
+        const path = require('path');
+        const logPath = path.join(__dirname, '../error.log');
+        const timestamp = new Date().toISOString();
+        fs.appendFileSync(logPath, `[${timestamp}] FATAL UNHANDLED REJECTION: ${reason}\n`);
+    }
+    catch (e) { }
 });

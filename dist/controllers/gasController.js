@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -30,7 +63,9 @@ const getGasMeters = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                 status: { not: 'removed' }
             },
             include: {
-                gasTopups: true
+                gasTopups: {
+                    where: { status: 'completed' }
+                }
             },
             orderBy: { createdAt: 'desc' }
         });
@@ -149,7 +184,8 @@ const topupGas = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             return res.status(400).json({ success: false, error: 'Invalid request data' });
         }
         const consumerProfile = yield prisma_1.default.consumerProfile.findUnique({
-            where: { userId }
+            where: { userId },
+            include: { user: true }
         });
         if (!consumerProfile) {
             return res.status(404).json({ success: false, error: 'Customer profile not found' });
@@ -168,6 +204,7 @@ const topupGas = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         // 1 RWF ≈ 0.00067 kg
         const units = amount / 1500;
         const result = yield prisma_1.default.$transaction((tx) => __awaiter(void 0, void 0, void 0, function* () {
+            var _a;
             // Create topup record
             const topup = yield tx.gasTopup.create({
                 data: {
@@ -246,11 +283,43 @@ const topupGas = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 newBalance = (wallet === null || wallet === void 0 ? void 0 : wallet.balance) || 0;
             }
             else if (payment_method === 'mobile_money') {
-                // Simulated Success
-                const wallet = yield tx.wallet.findFirst({
-                    where: { consumerId: consumerProfile.id, type: 'dashboard_wallet' }
+                // ==========================================
+                // PALMKASH INTEGRATION (Pending Status)
+                // ==========================================
+                const palmKash = (yield Promise.resolve().then(() => __importStar(require('../services/palmKash.service')))).default;
+                const pmResult = yield palmKash.initiatePayment({
+                    amount: amount,
+                    phoneNumber: req.body.phone || ((_a = consumerProfile.user) === null || _a === void 0 ? void 0 : _a.phone) || req.body.customer_phone || '',
+                    referenceId: `GAS-${Date.now()}`,
+                    description: `Gas topup for meter ${meter_number}`
                 });
-                newBalance = (wallet === null || wallet === void 0 ? void 0 : wallet.balance) || 0;
+                if (!pmResult.success) {
+                    throw new Error(pmResult.error || 'PalmKash payment failed');
+                }
+                // For order metadata and reference - SAVE IT TO DB!
+                // We create a pending order and topup
+                // We must update the objects before returning from transaction or rely on create override?
+                // Actually, Prisma create is already done above with 'completed' status.
+                // We need to modify the create call logic OR update it here.
+                // Since 'order' and 'topup' are already created above (lines 182, 194), we need to update them.
+                yield tx.gasTopup.update({
+                    where: { id: topup.id },
+                    data: { status: 'pending', orderId: order.id.toString() } // Ensure orderId is linked
+                });
+                yield tx.customerOrder.update({
+                    where: { id: order.id },
+                    data: {
+                        status: 'pending',
+                        metadata: JSON.stringify({
+                            paymentMethod: 'mobile_money',
+                            gateway: 'palmkash',
+                            externalRef: pmResult.transactionId,
+                            reference: pmResult.transactionId // Webhook looks for this
+                        })
+                    }
+                });
+                // Return special result indicating pending
+                return { topup, order, newBalance: 0, rewardUnits: 0, isPending: true, transactionId: pmResult.transactionId };
             }
             // Award gas rewards (10% of units)
             const rewardUnits = units * 0.1;
@@ -264,7 +333,19 @@ const topupGas = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             });
             return { topup, order, newBalance, rewardUnits };
         }));
-        const { topup, order, newBalance, rewardUnits } = result;
+        const { topup, order, newBalance, rewardUnits, isPending, transactionId } = result;
+        if (isPending) {
+            res.json({
+                success: true,
+                message: 'Payment initiated. Please check your phone.',
+                data: {
+                    order_id: order.id,
+                    status: 'pending',
+                    transaction_id: transactionId
+                }
+            });
+            return;
+        }
         // Generate gas meter token (16 digits formatted as XXXX-XXXX-XXXX-XXXX)
         const generateToken = () => {
             var _a;
