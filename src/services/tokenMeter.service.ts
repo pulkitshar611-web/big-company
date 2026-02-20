@@ -34,19 +34,15 @@ export interface TokenMeterRechargeResult {
 class TokenMeterService {
     // These environment variables should be set per the API documentation
     private apiBaseUrl: string;
-    private apiKey: string;
-    private merchantCode: string;
     private companyName: string;
     private userName: string;
-    private stronpowerApiKey: string;
+    private password: string;
 
     constructor() {
-        this.apiBaseUrl = process.env.TOKEN_METER_API_URL || 'http://www.server-newv.stronpower.com';
-        this.apiKey = process.env.TOKEN_METER_API_KEY || '';
-        this.merchantCode = process.env.TOKEN_METER_MERCHANT_CODE || '';
+        this.apiBaseUrl = process.env.STRONPOWER_BASE_URL || 'http://www.server-newv.stronpower.com';
         this.companyName = process.env.STRONPOWER_COMPANY_NAME || '';
         this.userName = process.env.STRONPOWER_USERNAME || '';
-        this.stronpowerApiKey = process.env.STRONPOWER_API_KEY || '';
+        this.password = process.env.STRONPOWER_PASSWORD || '';
     }
 
     /**
@@ -86,9 +82,10 @@ class TokenMeterService {
             console.log(`[TokenMeter] Meter ${params.meterNumber} validated successfully.`);
 
             // STEP 2: Proceed to Recharge
-            const requestBody = {
+            const payload = {
                 "CompanyName": this.companyName,
                 "UserName": this.userName,
+                "Password": this.password,
                 "MeterNo": params.meterNumber,
                 "Amount": params.amount
             };
@@ -98,16 +95,31 @@ class TokenMeterService {
                 'Accept': 'application/json',
             };
 
-            if (this.stronpowerApiKey) {
-                requestHeaders['api_key'] = this.stronpowerApiKey;
-            }
+            console.log("STRONPOWER REQUEST:", payload);
 
-            console.log(`🚀 [TokenMeter] Requesting token for meter ${params.meterNumber}, Amount: ${params.amount}`);
-            console.log('[TokenMeter] Request body:', JSON.stringify(requestBody, null, 2));
+            // If we are in demo mode for this specific meter, simulate success
+            const demoMeters = ['399703', '645424'];
+            const isDemoMeter = demoMeters.some(dm => params.meterNumber.includes(dm));
+            const isDemoEnabled = String(process.env.ENABLE_DEMO_METER).toLowerCase() === 'true';
+
+            if (isDemoMeter && isDemoEnabled) {
+                console.warn(`⚠️ [TokenMeter] Simulating Vending success for DEMO meter ${params.meterNumber}`);
+                const fakeToken = this.generateLocalToken();
+                return {
+                    success: true,
+                    token: fakeToken,
+                    meterNumber: params.meterNumber,
+                    amount: params.amount,
+                    units: this.calculateUnits(params.amount),
+                    apiReference: `DEMO-SP-${Date.now()}`,
+                    message: 'Demo Token generated successfully',
+                    raw: { demo: true, original_meter: params.meterNumber }
+                };
+            }
 
             const response = await axios.post(
                 `${this.apiBaseUrl}/api/VendingMeter`,
-                requestBody,
+                payload,
                 {
                     headers: requestHeaders,
                     timeout: 20000,
@@ -115,8 +127,7 @@ class TokenMeterService {
                 }
             );
 
-            console.log(`[TokenMeter] Response status: ${response.status}`);
-            console.log('[TokenMeter] Response data:', JSON.stringify(response.data, null, 2));
+            console.log("STRONPOWER RESPONSE:", response.data);
 
             if (response.status >= 400) {
                 return {
@@ -126,20 +137,28 @@ class TokenMeterService {
                 };
             }
 
-            console.log("STRONPOWER RAW RESPONSE:", JSON.stringify(response.data, null, 2));
+            // Extract the token from the API response
+            // Checking specific fields as requested, handling both object and array formats
+            const data = Array.isArray(response.data) ? response.data[0] : response.data;
 
-            // Parse the token from the API response
-            // Checking multiple possible casing/nesting scenarios for Stronpower
-            const token =
-                response.data?.Token ||
-                response.data?.token ||
-                response.data?.Data?.Token ||
-                response.data?.Result?.Token ||
-                response.data?.data?.token ||
-                response.data?.prepaid_token ||
-                response.data?.recharge_code;
+            const extractedToken =
+                data?.Token ||
+                data?.token ||
+                data?.Data?.Token;
 
-            if (!token) {
+            if (extractedToken) {
+                return {
+                    success: true,
+                    token: String(extractedToken),
+                    meterNumber: params.meterNumber,
+                    amount: params.amount,
+                    units: data?.Units || data?.units || this.calculateUnits(params.amount),
+                    apiReference: data?.Reference || data?.reference || data?.transaction_id || `SP-${Date.now()}`,
+                    message: data?.Message || data?.message || 'Token generated successfully',
+                    raw: response.data
+                };
+            } else {
+                // If token missing, return full provider response for debugging
                 console.error('[TokenMeter] Token missing in provider response:', JSON.stringify(response.data));
                 return {
                     success: false,
@@ -147,19 +166,6 @@ class TokenMeterService {
                     raw: response.data
                 };
             }
-
-            const units = response.data?.Units || response.data?.units || this.calculateUnits(params.amount);
-
-            return {
-                success: true,
-                token: String(token),
-                meterNumber: params.meterNumber,
-                amount: params.amount,
-                units,
-                apiReference: response.data?.Reference || response.data?.reference || response.data?.transaction_id || `SP-${Date.now()}`,
-                message: response.data?.Message || response.data?.message || 'Token generated successfully',
-                raw: response.data
-            };
         } catch (error: any) {
             console.error('[TokenMeter] API Error:', error.response?.data || error.message);
             return {
@@ -197,54 +203,59 @@ class TokenMeterService {
             return { success: true };
         }
 
+        // SPECIAL CASE: Demo/Test meter from user screenshots (Must be checked before API call)
+        const demoMeters = ['399703', '645424'];
+        const isDemoMeter = demoMeters.some(dm => meterNumber.includes(dm));
+        const isDemoEnabled = String(process.env.ENABLE_DEMO_METER).toLowerCase() === 'true';
+
+        if (isDemoMeter && isDemoEnabled) {
+            console.warn(`⚠️ [TokenMeter] Using DEMO MODE for meter ${meterNumber}`);
+            return { success: true, raw: { demo: true, message: "Bypassed validation via Demo Mode" } };
+        }
+
         try {
-            console.log(`🔍 [TokenMeter] Validating meter ${meterNumber}...`);
+            const payload = {
+                "CompanyName": this.companyName,
+                "UserName": this.userName,
+                "Password": this.password,
+                "MeterNo": meterNumber
+            };
+
+            console.log("STRONPOWER REQUEST (Validation):", payload);
             const response = await axios.post(
                 `${this.apiBaseUrl}/api/QueryMeterInfo`,
-                {
-                    "CompanyName": this.companyName,
-                    "UserName": this.userName,
-                    "MeterNo": meterNumber
-                },
+                payload,
                 {
                     headers: {
                         'Content-Type': 'application/json',
-                        'Accept': 'application/json',
-                        ...(this.stronpowerApiKey ? { 'api_key': this.stronpowerApiKey } : {})
+                        'Accept': 'application/json'
                     },
                     timeout: 10000,
                     validateStatus: (status) => status < 500,
                 }
             );
 
-            // Stronpower typically returns the meter info if valid, or an error message if invalid.
-            // If the response contains a valid meter number or customer info, we assume it's valid.
-            // Based on prompt "If meter is invalid, return error immediately", we trust the API response.
+            const data = Array.isArray(response.data) ? response.data[0] : response.data;
 
-            console.log(`[TokenMeter] Validation response fo ${meterNumber}:`, JSON.stringify(response.data));
-
-            if (response.status >= 400 || (response.data && response.data.error)) {
+            if (response.status >= 400 || (data && (data.error || data.Company_name === 'Data error' || data.CompanyName === 'Data error'))) {
                 return {
                     success: false,
-                    error: response.data?.message || response.data?.error || `Meter validation failed (HTTP ${response.status})`,
-                    raw: response.data
-                };
-            }
-
-            // Some APIs return success=false in 200 OK
-            if (response.data?.success === false) {
-                return {
-                    success: false,
-                    error: response.data?.message || 'Meter validation failed at provider',
+                    error: data?.message || data?.error || data?.Company_name || `Meter validation failed (HTTP ${response.status})`,
                     raw: response.data
                 };
             }
 
             // Check if returned data looks like a meter object
-            // If the API returns a "MeterNo" or "CustomerName" it's likely valid.
-            // If it returns null or empty object, treating as invalid might be safer, but let's be permissive if status is 200 unless clearly empty.
-            if (!response.data) {
-                return { success: false, error: 'Empty response from meter validation API', raw: response.data };
+            if (!data || (!data.MeterNo && !data.Meter_id && !data.CustomerName && !data.Customer_name)) {
+                let errorMsg = 'Invalid meter number or no data found for this meter';
+                if (data && data.Meter_type) {
+                    errorMsg = `Meter found is an "${data.Meter_type}" (${data.Unit || ''}). Please ensure you are using a Gas Meter number.`;
+                }
+                return {
+                    success: false,
+                    error: errorMsg,
+                    raw: response.data
+                };
             }
 
             return { success: true, raw: response.data };

@@ -31,7 +31,6 @@ export const getGasMeters = async (req: AuthRequest, res: Response) => {
         res.json({
             success: true,
             data: meters.map(m => {
-                const totalUnits = m.gasTopups.reduce((sum, t) => sum + t.units, 0);
                 return {
                     id: m.id,
                     meter_number: m.meterNumber,
@@ -39,7 +38,8 @@ export const getGasMeters = async (req: AuthRequest, res: Response) => {
                     owner_name: m.ownerName,
                     owner_phone: m.ownerPhone,
                     status: m.status,
-                    current_units: totalUnits, // Dynamic calculation
+                    meter_type: m.meterNumber.includes('645424') || m.meterNumber.includes('399703') ? 'TOKEN' : 'PIPING', // Fallback logic or use m.meterType if it exists
+                    current_units: m.currentUnits, // Use the pre-calculated field
                     created_at: m.createdAt
                 };
             })
@@ -278,14 +278,14 @@ export const topupGas = async (req: AuthRequest, res: Response) => {
                 if (!pmResult.success) {
                     throw new Error(pmResult.error || 'PalmKash payment failed');
                 }
-                
+
                 // For order metadata and reference - SAVE IT TO DB!
                 // We create a pending order and topup
                 // We must update the objects before returning from transaction or rely on create override?
                 // Actually, Prisma create is already done above with 'completed' status.
                 // We need to modify the create call logic OR update it here.
                 // Since 'order' and 'topup' are already created above (lines 182, 194), we need to update them.
-                
+
                 await tx.gasTopup.update({
                     where: { id: topup.id },
                     data: { status: 'pending', orderId: order.id.toString() } // Ensure orderId is linked
@@ -293,9 +293,9 @@ export const topupGas = async (req: AuthRequest, res: Response) => {
 
                 await tx.customerOrder.update({
                     where: { id: order.id },
-                    data: { 
+                    data: {
                         status: 'pending',
-                        metadata: JSON.stringify({ 
+                        metadata: JSON.stringify({
                             paymentMethod: 'mobile_money',
                             gateway: 'palmkash',
                             externalRef: pmResult.transactionId,

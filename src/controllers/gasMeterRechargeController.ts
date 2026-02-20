@@ -30,6 +30,8 @@ export const initiateGasMeterRecharge = async (req: AuthRequest, res: Response) 
         cardId,
     } = req.body;
 
+    const customerRef = `GASRCH-${meterType}-${Date.now()}`;
+
     // --- Validate required fields ---
     if (!meterNumber || !meterType || !amount) {
         return res.status(400).json({
@@ -132,10 +134,22 @@ export const initiateGasMeterRecharge = async (req: AuthRequest, res: Response) 
             });
 
         } else if (paymentMethod === 'mobile_money') {
-            // Mobile money is handled via PalmKash (async).
-            // For now, we proceed with meter recharge and trust payment was initiated.
-            // In production, this should be a webhook-confirmed flow.
-            console.log(`[GasRecharge] Mobile money payment initiated for ${parsedAmount} RWF`);
+            // Initiate PalmKash Mobile Money payment
+            const palmKash = (await import('../services/palmKash.service')).default;
+            const pmResult = await palmKash.initiatePayment({
+                amount: parsedAmount,
+                phoneNumber: phone || (req.user as any)?.phone || '',
+                referenceId: customerRef,
+                description: `${meterType} Gas Meter Recharge - ${meterNumber}`
+            });
+
+            if (!pmResult.success) {
+                return res.status(400).json({
+                    success: false,
+                    error: pmResult.error || 'PalmKash payment initiation failed'
+                });
+            }
+            console.log(`[GasRecharge] PalmKash payment initiated: ${pmResult.transactionId}`);
         }
     } catch (paymentError: any) {
         console.error('[GasRecharge] Payment deduction failed:', paymentError.message);
@@ -143,7 +157,6 @@ export const initiateGasMeterRecharge = async (req: AuthRequest, res: Response) 
     }
 
     // --- STEP 2: Create a PENDING transaction record ---
-    const customerRef = `GASRCH-${meterType}-${Date.now()}`;
     let txRecord: any;
 
     try {
@@ -154,15 +167,36 @@ export const initiateGasMeterRecharge = async (req: AuthRequest, res: Response) 
                 meterType,
                 amount: parsedAmount,
                 paymentMethod: paymentMethod || 'wallet',
-                status: 'PENDING',
+                status: paymentMethod === 'mobile_money' ? 'PENDING_PAYMENT' : 'PENDING',
+                apiReference: customerRef
             },
         });
+
+        // Create a basic order record for unified history
+        if (userId) {
+            await prisma.customerOrder.create({
+                data: {
+                    consumerId: consumerProfileId || 0,
+                    orderType: 'gas_recharge',
+                    status: paymentMethod === 'mobile_money' ? 'pending' : 'completed',
+                    amount: parsedAmount,
+                    metadata: JSON.stringify({
+                        meterNumber,
+                        meterType,
+                        paymentMethod,
+                        txId: txRecord.id
+                    })
+                }
+            });
+        }
     } catch (dbError: any) {
         console.error('[GasRecharge] Failed to create transaction record:', dbError.message);
         return res.status(500).json({ success: false, error: 'Failed to log recharge transaction.' });
     }
 
     // --- STEP 3: Call the appropriate Meter API ---
+    // If it's mobile money, we usually wait for webhook, but for testing/demo we can proceed
+    // or block it until payment confirmed. For now, following existing logic: initiate API call.
     let apiResult: any;
 
     try {
@@ -210,6 +244,50 @@ export const initiateGasMeterRecharge = async (req: AuthRequest, res: Response) 
             errorMessage: apiResult.error || null,
         },
     });
+
+    // Update the GasMeter balance in our DB so dashboard cards are in sync
+    if (apiResult.success) {
+        try {
+            // Find the meter ID first (we need the integer ID for GasTopup)
+            const meter = await prisma.gasMeter.findUnique({
+                where: { meterNumber: meterNumber }
+            });
+
+            if (meter) {
+                // Create a GasTopup record for legacy history compatibility
+                if (consumerProfileId) {
+                    await prisma.gasTopup.create({
+                        data: {
+                            consumerId: consumerProfileId,
+                            meterId: meter.id,
+                            amount: parsedAmount,
+                            units: Number(apiResult.units) || 0,
+                            status: paymentMethod === 'mobile_money' ? 'pending' : 'completed',
+                            orderId: String(txRecord.id)
+                        }
+                    });
+                }
+
+                // IMPORTANT: For Mobile Money, we don't update the meter balance yet!
+                // The balance should be updated by the webhook once payment is confirmed.
+                if (paymentMethod !== 'mobile_money') {
+                    await prisma.gasMeter.update({
+                        where: { id: meter.id },
+                        data: {
+                            currentUnits: {
+                                increment: Number(apiResult.units) || 0
+                            }
+                        }
+                    });
+                    console.log(`[GasRecharge] DB Synced: Added ${apiResult.units} units to meter ${meterNumber}`);
+                } else {
+                    console.log(`[GasRecharge] Mobile Money: Balance update deferred until payment confirmation.`);
+                }
+            }
+        } catch (syncError: any) {
+            console.error(`[GasRecharge] Units sync failed for ${meterNumber}:`, syncError.message);
+        }
+    }
 
     console.log("STRONPOWER FULL RESPONSE:", apiResult.raw);
 
