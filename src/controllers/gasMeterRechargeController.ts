@@ -3,6 +3,7 @@ import { AuthRequest } from '../middleware/authMiddleware';
 import prisma from '../utils/prisma';
 import tokenMeterService from '../services/tokenMeter.service';
 import pipingMeterService from '../services/pipingMeter.service';
+import zhongyiMeterService from '../services/zhongyiMeter.service';
 
 /**
  * Gas Meter Recharge Controller
@@ -22,15 +23,19 @@ import pipingMeterService from '../services/pipingMeter.service';
  */
 export const initiateGasMeterRecharge = async (req: AuthRequest, res: Response) => {
     const {
-        meterNumber,
         meterType,
         amount,
         paymentMethod,
         phone,
         cardId,
+        provider,            // 'stronpower' (default) | 'zhongyi'
     } = req.body;
 
+    // Always sanitize — trim whitespace, remove any MTR- prefix
+    const meterNumber: string = String(req.body.meterNumber || '').trim().replace(/^MTR-/i, '');
+
     const customerRef = `GASRCH-${meterType}-${Date.now()}`;
+    const selectedProvider: string = (provider || 'stronpower').toLowerCase();
 
     // --- Validate required fields ---
     if (!meterNumber || !meterType || !amount) {
@@ -194,20 +199,27 @@ export const initiateGasMeterRecharge = async (req: AuthRequest, res: Response) 
         return res.status(500).json({ success: false, error: 'Failed to log recharge transaction.' });
     }
 
-    // --- STEP 3: Call the appropriate Meter API ---
-    // If it's mobile money, we usually wait for webhook, but for testing/demo we can proceed
-    // or block it until payment confirmed. For now, following existing logic: initiate API call.
+    // --- STEP 3: Call the appropriate Meter API (routed by provider) ---
     let apiResult: any;
+    console.log(`[GasRecharge] Provider: ${selectedProvider} | Meter: ${meterNumber} | Type: ${meterType}`);
 
     try {
-        if (meterType === 'TOKEN') {
+        if (selectedProvider === 'zhongyi') {
+            // ── Zhongyi Provider ───────────────────────────────────────────
+            apiResult = await zhongyiMeterService.rechargeMeter({
+                meterNumber,
+                amount: parsedAmount,
+                customerRef,
+            });
+        } else if (meterType === 'TOKEN') {
+            // ── Stronpower – Token Meter ───────────────────────────────────
             apiResult = await tokenMeterService.rechargeTokenMeter({
                 meterNumber,
                 amount: parsedAmount,
                 customerRef,
             });
         } else {
-            // PIPING
+            // ── Stronpower – Piping Meter ──────────────────────────────────
             apiResult = await pipingMeterService.rechargePipingMeter({
                 meterNumber,
                 amount: parsedAmount,
