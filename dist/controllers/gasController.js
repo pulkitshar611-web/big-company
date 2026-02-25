@@ -72,7 +72,6 @@ const getGasMeters = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         res.json({
             success: true,
             data: meters.map(m => {
-                const totalUnits = m.gasTopups.reduce((sum, t) => sum + t.units, 0);
                 return {
                     id: m.id,
                     meter_number: m.meterNumber,
@@ -80,7 +79,8 @@ const getGasMeters = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                     owner_name: m.ownerName,
                     owner_phone: m.ownerPhone,
                     status: m.status,
-                    current_units: totalUnits, // Dynamic calculation
+                    meter_type: m.meterNumber.includes('645424') || m.meterNumber.includes('399703') ? 'TOKEN' : 'PIPING', // Fallback logic or use m.meterType if it exists
+                    current_units: m.currentUnits, // Use the pre-calculated field
                     created_at: m.createdAt
                 };
             })

@@ -79,20 +79,17 @@ class PalmKashService {
                 const requestHeaders = {
                     'Authorization': `Bearer ${process.env.PALMKASH_SECRET_KEY}`,
                     'Content-Type': 'application/json',
-                    'Accept': 'application/json',
-                    'User-Agent': 'Mozilla/5.0'
+                    'Accept': 'application/json'
                 };
                 // DEBUG LOGS BEFORE REQUEST
                 console.log('--- [PalmKash PRE-REQUEST DEBUG] ---');
                 console.log('URL:', url);
                 console.log('Headers:', JSON.stringify(requestHeaders, null, 2));
                 console.log('Body:', JSON.stringify(requestBody, null, 2));
-                console.log('Callback URL:', callback_url);
                 console.log('------------------------------------');
                 const response = yield axios_1.default.post(url, requestBody, {
                     headers: requestHeaders,
                     timeout: 15000,
-                    maxRedirects: 5,
                     validateStatus: (status) => status < 500
                 });
                 // DEBUG LOGS AFTER RESPONSE
@@ -161,7 +158,8 @@ class PalmKashService {
                 }, {
                     headers: {
                         'Authorization': `Bearer ${this.secretKey}`,
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
                     }
                 });
                 return response.data; // { status: 'SUCCESS' | 'FAILED' | 'PENDING', ... }

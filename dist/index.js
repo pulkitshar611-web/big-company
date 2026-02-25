@@ -52,6 +52,7 @@ const debugRoutes_1 = __importStar(require("./routes/debugRoutes"));
 const trainingRoutes_1 = __importDefault(require("./routes/trainingRoutes"));
 const webhookRoutes_1 = __importDefault(require("./routes/webhookRoutes"));
 const ipDebugRoutes_1 = __importDefault(require("./routes/ipDebugRoutes"));
+const gasMeterRechargeRoutes_1 = __importDefault(require("./routes/gasMeterRechargeRoutes"));
 console.log('--- Server Starting ---');
 dotenv_1.default.config();
 const app = (0, express_1.default)();
@@ -120,6 +121,7 @@ app.use('/rewards', rewardsRoutes_1.default);
 app.use('/api/webhooks', webhookRoutes_1.default);
 app.use('/api/debug', ipDebugRoutes_1.default); // Temporary IP debug endpoint
 app.use('/debug', debugRoutes_1.default); // Public debug endpoint
+app.use('/gas-recharge', gasMeterRechargeRoutes_1.default); // Gas Meter Recharge module
 (0, debugRoutes_1.setAppInstance)(app); // Enable route listing in debug
 app.get('/', (req, res) => {
     res.send('Big Company API is running');

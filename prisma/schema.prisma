@@ -508,6 +508,7 @@ model GasTopup {
   meterId         Int
   amount          Float
   units           Float
+  isVendByUnit    Boolean         @default(false)
   currency        String          @default("RWF")
   status          String          @default("completed")
   orderId         String?
@@ -888,11 +889,13 @@ model GasRechargeTransaction {
   meterNumber   String
   meterType     String                            // TOKEN or PIPING
   amount        Float
+  isVendByUnit  Boolean  @default(false)         // Recharge by unit or money
   tokenValue    String?  @db.Text                // Token string returned for TOKEN meters (nullable for PIPING)
   apiReference  String?                           // Reference ID returned from the external meter API
   status        String   @default("PENDING")     // SUCCESS, FAILED, PENDING
   errorMessage  String?  @db.Text                // Store error details if failed
   paymentMethod String   @default("wallet")      // wallet, mobile_money, nfc_card
+  operatorId    Int?                              // Optional: ID of the POS operator
   createdAt     DateTime @default(now())
   updatedAt     DateTime @default(now()) @updatedAt
 
