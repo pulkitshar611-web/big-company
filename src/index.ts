@@ -14,6 +14,7 @@ import debugRoutes, { setAppInstance } from './routes/debugRoutes';
 import trainingRoutes from './routes/trainingRoutes';
 import webhookRoutes from './routes/webhookRoutes';
 import ipDebugRoutes from './routes/ipDebugRoutes';
+import gasMeterRechargeRoutes from './routes/gasMeterRechargeRoutes';
 console.log('--- Server Starting ---');
 
 dotenv.config();
@@ -62,11 +63,11 @@ app.use((req, res, next) => {
   const logMsg = `[${timestamp}] ${req.method} ${req.url}\n${req.body && Object.keys(req.body).length > 0 ? `  Body: ${JSON.stringify(req.body)}\n` : ''}`;
   console.log(logMsg);
   try {
-     const fs = require('fs');
-     const path = require('path');
-     const os = require('os');
-     fs.appendFileSync(path.join(os.tmpdir(), 'backend_output.log'), logMsg);
-  } catch (e) {}
+    const fs = require('fs');
+    const path = require('path');
+    const os = require('os');
+    fs.appendFileSync(path.join(os.tmpdir(), 'backend_output.log'), logMsg);
+  } catch (e) { }
   next();
 });
 
@@ -89,6 +90,7 @@ app.use('/rewards', rewardsRoutes);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/debug', ipDebugRoutes); // Temporary IP debug endpoint
 app.use('/debug', debugRoutes); // Public debug endpoint
+app.use('/gas-recharge', gasMeterRechargeRoutes); // Gas Meter Recharge module
 setAppInstance(app); // Enable route listing in debug
 
 app.get('/', (req, res) => {
@@ -139,7 +141,7 @@ process.on('uncaughtException', (err) => {
     const logPath = path.join(__dirname, '../error.log');
     const timestamp = new Date().toISOString();
     fs.appendFileSync(logPath, `[${timestamp}] FATAL UNCAUGHT EXCEPTION: ${err.stack || err}\n`);
-  } catch (e) {}
+  } catch (e) { }
   process.exit(1);
 });
 
@@ -152,6 +154,5 @@ process.on('unhandledRejection', (reason, promise) => {
     const logPath = path.join(__dirname, '../error.log');
     const timestamp = new Date().toISOString();
     fs.appendFileSync(logPath, `[${timestamp}] FATAL UNHANDLED REJECTION: ${reason}\n`);
-  } catch (e) {}
+  } catch (e) { }
 });
-

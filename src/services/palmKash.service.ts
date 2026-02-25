@@ -19,8 +19,8 @@ class PalmKashService {
    */
   private async getAccessToken(): Promise<string> {
     try {
- 
-      return ""; 
+
+      return "";
     } catch (error: any) {
       console.error('PalmKash Auth Error:', error.response?.data || error.message);
       throw new Error('Failed to authenticate with PalmKash');
@@ -37,10 +37,10 @@ class PalmKashService {
     description: string;
     callbackUrl?: string;
   }) {
- 
+
     const isDev = process.env.DEV_MODE === 'true' || process.env.DEV_MODE === '1';
     console.log(`🔌 [PalmKash] DEV_MODE config: "${process.env.DEV_MODE}", isDev: ${isDev}`);
-    
+
     if (isDev) {
       console.log(`🛠️ [PalmKash DEV MODE] Bypassing real payment for ${params.phoneNumber}, Amount: ${params.amount}`);
       return {
@@ -59,7 +59,7 @@ class PalmKashService {
       } else if (phone.length === 9 || phone.length === 10) {
         // If it's a 9 or 10 digit number without 250, add it
         if (!phone.startsWith('250')) {
-             phone = '250' + phone;
+          phone = '250' + phone;
         }
       }
 
@@ -80,8 +80,7 @@ class PalmKashService {
       const requestHeaders = {
         'Authorization': `Bearer ${process.env.PALMKASH_SECRET_KEY}`,
         'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'User-Agent': 'Mozilla/5.0'
+        'Accept': 'application/json'
       };
 
       // DEBUG LOGS BEFORE REQUEST
@@ -89,14 +88,12 @@ class PalmKashService {
       console.log('URL:', url);
       console.log('Headers:', JSON.stringify(requestHeaders, null, 2));
       console.log('Body:', JSON.stringify(requestBody, null, 2));
-      console.log('Callback URL:', callback_url);
       console.log('------------------------------------');
-      
+
       const response = await axios.post(url, requestBody, {
         headers: requestHeaders,
         timeout: 15000,
-        maxRedirects: 5,
-        validateStatus: (status) => status < 500 
+        validateStatus: (status) => status < 500
       });
 
       // DEBUG LOGS AFTER RESPONSE
@@ -129,12 +126,12 @@ class PalmKashService {
       return {
         success: true,
         transactionId: response.data.reference || response.data.transaction_id,
-        status: response.data.status || 'pending', 
+        status: response.data.status || 'pending',
         message: response.data.message || 'Payment initiated'
       };
     } catch (error: any) {
       console.error('PalmKash Payment Error:', error.response?.data || error.message);
-      
+
       // If we still get a 500 or network error that wasn't caught by validateStatus
       const contentType = error.response?.headers?.['content-type'] || '';
       if (error.response && !contentType.includes('application/json')) {
@@ -162,12 +159,13 @@ class PalmKashService {
     try {
       const response = await axios.post(`${this.baseUrl}/payments/get-payment-status`, {
         app_id: this.clientId,
-        app_secret: this.secretKey, 
+        app_secret: this.secretKey,
         reference: transactionId
       }, {
         headers: {
           'Authorization': `Bearer ${this.secretKey}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
         }
       });
       return response.data; // { status: 'SUCCESS' | 'FAILED' | 'PENDING', ... }
@@ -179,4 +177,3 @@ class PalmKashService {
 }
 
 export default new PalmKashService();
-  

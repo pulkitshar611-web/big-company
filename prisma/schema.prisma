@@ -881,6 +881,26 @@ model SettlementInvoice {
   @@map("settlementinvoice")
 }
 
+// Gas Meter Recharge Transaction - Tracks all meter recharge operations
+model GasRechargeTransaction {
+  id            Int      @id @default(autoincrement())
+  customerId    Int?                              // Optional: linked consumer (null for walk-in)
+  meterNumber   String
+  meterType     String                            // TOKEN or PIPING
+  amount        Float
+  tokenValue    String?  @db.Text                // Token string returned for TOKEN meters (nullable for PIPING)
+  apiReference  String?                           // Reference ID returned from the external meter API
+  status        String   @default("PENDING")     // SUCCESS, FAILED, PENDING
+  errorMessage  String?  @db.Text                // Store error details if failed
+  paymentMethod String   @default("wallet")      // wallet, mobile_money, nfc_card
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @default(now()) @updatedAt
+
+  @@index([meterNumber])
+  @@index([customerId])
+  @@map("gasrechargetransaction")
+}
+
 enum course_level {
   BEGINNER
   INTERMEDIATE
