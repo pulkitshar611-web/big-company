@@ -71,10 +71,9 @@ class TokenMeterService {
             const payload = {
                 "CompanyName": this.companyName,
                 "UserName": this.userName,
-                "Password": this.password,
+                "PassWord": this.password,              // Spec requires capital W
                 "MeterID": params.meterNumber,
-                "MeterNo": params.meterNumber, // Fallback for older systems
-                "is_vend_by_unit": params.isVendByUnit ? 1 : 0, 
+                "is_vend_by_unit": params.isVendByUnit === true, // Must be boolean, not 0/1
                 "Amount": params.amount
             };
 
@@ -114,7 +113,7 @@ class TokenMeterService {
      * QueryMeterInfo: Get basic meter information.
      */
     async queryMeterInfo(meterNumber: string): Promise<any> {
-        return this.baseRequest('QueryMeterInfo', { MeterNo: meterNumber });
+        return this.baseRequest('QueryMeterInfo', { MeterID: meterNumber }); // Spec uses MeterID, not MeterNo
     }
 
     /**
@@ -132,7 +131,7 @@ class TokenMeterService {
             const payload = {
                 "CompanyName": this.companyName,
                 "UserName": this.userName,
-                "Password": this.password,
+                "PassWord": this.password,          // capital W per spec
                 ...extraFields
             };
 
@@ -151,19 +150,28 @@ class TokenMeterService {
     }
 
     private handleResponse(response: any, params: TokenMeterRechargeParams): TokenMeterRechargeResult {
-        // Handle empty array response []
+        // Handle empty array response [] — meter is likely not registered
         if (Array.isArray(response.data) && response.data.length === 0) {
             return {
                 success: false,
-                error: 'Meter not found or system rejection (Empty response)',
+                error: 'Meter not found or system rejection (Empty response). Try VendingMeterDirectly for unregistered meters.',
                 raw: response.data
             };
         }
 
         const data = Array.isArray(response.data) ? response.data[0] : response.data;
+
+        // Check API-level error code (API can return HTTP 200 with Code != 0 on auth/logic failure)
+        if (data?.Code !== undefined && data.Code !== 0 && data.Code !== 1) {
+            return {
+                success: false,
+                error: `API Error Code ${data.Code}: ${data.Message || 'Authentication or parameter error'}`,
+                raw: response.data
+            };
+        }
         
-        // Extract token from various possible paths
-        const extractedToken = data?.Token || data?.token || data?.Data?.Token;
+        // Extract token — Data.Token (nested) is the primary path per Stronpower spec
+        const extractedToken = data?.Data?.Token || data?.Token || data?.token;
 
         if (extractedToken && String(extractedToken).trim() !== "") {
             return {
@@ -183,6 +191,43 @@ class TokenMeterService {
             error: data?.Message || data?.message || 'Token missing in response (Operation likely failed)',
             raw: response.data
         };
+    }
+
+    /**
+     * VendingMeterDirectly: Recharge an UNREGISTERED token meter.
+     * Use this when VendingMeter returns an empty [] response.
+     * Key differences from VendingMeter:
+     *   - Endpoint: /api/VendingMeterDirectly
+     *   - Field: MeterId (lowercase 'd')
+     *   - Amount: must be a string
+     *   - No is_vend_by_unit field
+     */
+    async directVendMeter(params: TokenMeterRechargeParams): Promise<TokenMeterRechargeResult> {
+        try {
+            const payload = {
+                "CompanyName": this.companyName,
+                "UserName": this.userName,
+                "PassWord": this.password,         // capital W per spec
+                "MeterId": params.meterNumber,     // lowercase 'd' — per spec for this endpoint
+                "Amount": String(params.amount)    // string — per spec for this endpoint
+            };
+
+            const response = await axios.post(
+                `${this.apiBaseUrl}/api/VendingMeterDirectly`,
+                payload,
+                {
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    timeout: 20000,
+                    validateStatus: (status) => status < 500,
+                }
+            );
+
+            console.log("STRONPOWER VendingMeterDirectly RESPONSE:", response.data);
+            return this.handleResponse(response, params);
+
+        } catch (error: any) {
+            return this.handleError(error);
+        }
     }
 
     private handleError(error: any): TokenMeterRechargeResult {
