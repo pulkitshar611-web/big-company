@@ -1,21 +1,25 @@
-import axios from 'axios';
-
 /**
  * Piping Gas Meter Service
- * 
- * Handles integration with Direct Piping Gas Meters.
- * API Swagger reference: http://www.server-newv.stronpower.com/swagger/ui/index
- * 
+ *
+ * Handles integration with Direct Piping Gas Meters via the Lorawan API.
+ *
  * Unlike Token Meters, piping meters are recharged directly:
- * the API sends the credit to the meter's controller via the network.
+ * the Lorawan API sends the credit to the meter's controller via the IoT network.
  * No physical token is needed — the meter auto-updates.
- * 
+ *
  * Flow:
- *  1. Customer pays → calls rechargePipingMeter()
- *  2. System calls Stronpower API
- *  3. API directly credits the meter unit
- *  4. API returns confirmation with reference number
+ *  1. login()            → obtain apiToken (cached in gasLorawanService)
+ *  2. getMeterInfo()     → validate meter exists
+ *  3. rechargeMeter()    → top-up the meter, get orderId
+ *  4. getRechargeStatus()→ poll until success / failed / timeout
+ *
+ * NOTE: This service delegates all API calls to gasLorawanService.js.
+ *       The external interface (rechargePipingMeter) is intentionally
+ *       unchanged so gasMeterRechargeController.ts needs no modification.
  */
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const gasLorawanService = require('./gasLorawanService');
 
 export interface PipingMeterRechargeParams {
     meterNumber: string;
@@ -29,132 +33,157 @@ export interface PipingMeterRechargeResult {
     meterNumber?: string;
     amount?: number;
     units?: number;
-    apiReference?: string;   // External transaction reference from Stronpower
+    apiReference?: string;   // orderId from Lorawan API
     message?: string;
     error?: string;
 }
 
-class PipingMeterService {
-    private apiBaseUrl: string;
-    private apiKey: string;
-    private apiSecret: string;
-    private companyCode: string;
+// How long (ms) to poll for a final status before giving up.
+const POLL_TIMEOUT_MS = 30_000;  // 30 seconds
+const POLL_INTERVAL_MS = 3_000;  // poll every 3 seconds
 
-    constructor() {
-        // Stronpower API base URL (from swagger docs: http://www.server-newv.stronpower.com)
-        this.apiBaseUrl = process.env.PIPING_METER_API_URL || 'http://www.server-newv.stronpower.com/api';
-        this.apiKey = process.env.PIPING_METER_API_KEY || '';
-        this.apiSecret = process.env.PIPING_METER_API_SECRET || '';
-        this.companyCode = process.env.PIPING_METER_COMPANY_CODE || '';
-    }
+class PipingMeterService {
 
     /**
-     * Main public method: recharge a piping gas meter directly.
-     * Makes API call to Stronpower system which directly credits the meter.
+     * Main public method: recharge a piping gas meter via the Lorawan API.
+     *
+     * Steps:
+     *   1. (Optional) Validate meter with getMeterInfo — skipped in DEV_MODE.
+     *   2. Call rechargeMeter() to initiate top-up.
+     *   3. Poll getRechargeStatus() until success/failed or timeout.
      */
     async rechargePipingMeter(params: PipingMeterRechargeParams): Promise<PipingMeterRechargeResult> {
         const isDev = process.env.DEV_MODE === 'true' || process.env.DEV_MODE === '1';
 
+        // ── DEV MODE: return a simulated success ─────────────────────────
         if (isDev) {
-            console.log(`🛠️ [PipingMeter DEV MODE] Simulating recharge for meter: ${params.meterNumber}, Amount: ${params.amount}`);
+            console.log(`🛠️ [PipingMeter DEV] Simulating Lorawan recharge for meter: ${params.meterNumber}, Amount: ${params.amount}`);
             const units = this.calculateUnits(params.amount);
             return {
                 success: true,
                 meterNumber: params.meterNumber,
                 amount: params.amount,
                 units,
-                apiReference: `DEV-PIPE-${Date.now()}`,
+                apiReference: `DEV-LORAWAN-${Date.now()}`,
                 message: `Piping meter recharged successfully with ${units} m³ (DEV_MODE)`,
             };
         }
 
+        // ── PRODUCTION: real Lorawan API call ────────────────────────────
         try {
-            // Stronpower API recharge endpoint (based on swagger documentation)
-            const requestBody = {
-                meter_no: params.meterNumber,
-                recharge_amount: params.amount,
-                currency: 'RWF',
-                company_code: this.companyCode,
-                order_no: params.customerRef,
-                customer_phone: params.customerPhone || '',
-            };
+            const devEui = params.meterNumber;
 
-            const requestHeaders = {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
-                'Authorization': `Bearer ${this.apiKey}`,
-                'X-Api-Key': this.apiKey,
-                'X-Api-Secret': this.apiSecret,
-            };
+            // STEP 1: Validate meter exists before charging
+            console.log(`[PipingMeter] Validating meter ${devEui}...`);
+            const meterInfo = await gasLorawanService.getMeterInfo(devEui);
 
-            console.log(`🚀 [PipingMeter] Recharging meter ${params.meterNumber}, Amount: ${params.amount}`);
-            console.log('[PipingMeter] Request body:', JSON.stringify(requestBody, null, 2));
-
-            const response = await axios.post(
-                `${this.apiBaseUrl}/recharge/meter`,
-                requestBody,
-                {
-                    headers: requestHeaders,
-                    timeout: 20000,
-                    validateStatus: (status) => status < 500,
-                }
-            );
-
-            console.log(`[PipingMeter] Response status: ${response.status}`);
-            console.log('[PipingMeter] Response data:', JSON.stringify(response.data, null, 2));
-
-            if (response.status >= 400) {
+            if (!meterInfo.success) {
+                console.warn(`[PipingMeter] Meter validation failed: ${meterInfo.error}`);
                 return {
                     success: false,
-                    error: response.data?.message || response.data?.error || `API error: HTTP ${response.status}`,
+                    error: meterInfo.error || 'Meter not found or invalid.',
                 };
             }
 
-            // Parse success from response - Stronpower API may use different success indicators
-            const isSuccess =
-                response.data?.success === true ||
-                response.data?.status === 'SUCCESS' ||
-                response.data?.code === 0 ||
-                response.data?.result_code === '00' ||
-                response.data?.data?.status === 'SUCCESS';
+            console.log(`[PipingMeter] Meter ${devEui} validated. Initiating top-up for ${params.amount}...`);
 
-            if (!isSuccess) {
+            // STEP 2: Recharge the meter
+            const rechargeResult = await gasLorawanService.rechargeMeter(devEui, params.amount);
+
+            if (!rechargeResult.success) {
                 return {
                     success: false,
-                    error: response.data?.message || response.data?.error || 'Piping meter recharge was rejected by API',
+                    error: rechargeResult.error || 'Recharge initiation failed.',
                 };
             }
 
-            const units = response.data?.units || response.data?.data?.units || this.calculateUnits(params.amount);
-            const apiRef =
-                response.data?.reference ||
-                response.data?.transaction_id ||
-                response.data?.data?.order_no ||
-                response.data?.order_no;
+            const { orderId } = rechargeResult;
+            console.log(`[PipingMeter] Recharge submitted. orderId: ${orderId}. Polling for status...`);
+
+            // STEP 3: Poll until we get a terminal status (success=2 or failed=3)
+            const pollResult = await this.pollForFinalStatus(orderId);
+
+            if (!pollResult.success) {
+                return {
+                    success: false,
+                    error: pollResult.error || 'Recharge did not complete in time.',
+                    apiReference: orderId,
+                };
+            }
+
+            const units = this.calculateUnits(params.amount);
 
             return {
                 success: true,
                 meterNumber: params.meterNumber,
                 amount: params.amount,
                 units,
-                apiReference: String(apiRef || params.customerRef),
-                message: response.data?.message || 'Piping meter recharged successfully',
+                apiReference: orderId,
+                message: `Piping gas meter recharged successfully. Order ${orderId} confirmed.`,
             };
+
         } catch (error: any) {
-            console.error('[PipingMeter] API Error:', error.response?.data || error.message);
+            console.error('[PipingMeter] Unexpected error:', error.message);
             return {
                 success: false,
-                error: error.response?.data?.message || error.message || 'Failed to connect to Piping Meter API',
+                error: error.message || 'Failed to connect to Piping Meter (Lorawan) API',
             };
         }
     }
 
     /**
+     * Poll getRechargeStatus() until the order reaches a terminal state
+     * (status 2 = success, status 3 = failed) or the timeout is reached.
+     */
+    private async pollForFinalStatus(
+        orderId: string,
+    ): Promise<{ success: boolean; error?: string }> {
+        const deadline = Date.now() + POLL_TIMEOUT_MS;
+
+        while (Date.now() < deadline) {
+            const statusResult = await gasLorawanService.getRechargeStatus(orderId);
+
+            if (!statusResult.success) {
+                // API call itself failed — treat as error but keep polling
+                console.warn(`[PipingMeter] Status check error: ${statusResult.error}. Retrying...`);
+            } else {
+                const { status, statusLabel } = statusResult;
+                console.log(`[PipingMeter] Order ${orderId} status: ${status} (${statusLabel})`);
+
+                if (status === 2) {
+                    return { success: true };          // ✅ Recharge confirmed
+                }
+
+                if (status === 3) {
+                    return { success: false, error: 'Recharge failed on the meter provider side (status: failed).' };
+                }
+
+                // status 0 (waiting) or 1 (processing) → keep polling
+            }
+
+            await this.sleep(POLL_INTERVAL_MS);
+        }
+
+        // Timed out — the order may still complete asynchronously.
+        // We return success=false so the controller can mark it as PENDING.
+        console.warn(`[PipingMeter] Order ${orderId} status polling timed out after ${POLL_TIMEOUT_MS}ms.`);
+        return {
+            success: false,
+            error: `Order ${orderId} is still processing. Check status later (timed out after ${POLL_TIMEOUT_MS / 1000}s).`,
+        };
+    }
+
+    /**
      * Calculate approximate gas units for a given RWF amount.
-     * Piping gas is measured in m³. Rate: ~850 RWF per m³ (from system config).
+     * Piping gas is measured in m³. Rate: ~850 RWF per m³ (configurable).
      */
     private calculateUnits(amountRwf: number): number {
-        return parseFloat((amountRwf / 850).toFixed(4));
+        const ratePerM3 = Number(process.env.LORAWAN_RATE_PER_M3) || 850;
+        return parseFloat((amountRwf / ratePerM3).toFixed(4));
+    }
+
+    private sleep(ms: number): Promise<void> {
+        return new Promise((resolve) => setTimeout(resolve, ms));
     }
 }
 

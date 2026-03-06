@@ -1,4 +1,4 @@
-import express from 'express'; // Restart trigger
+import express from 'express'; // Restart trigger 2
 import cors from 'cors';
 import dotenv from 'dotenv';
 import authRoutes from './routes/authRoutes';
