@@ -152,7 +152,7 @@ async function getMeterInfo(devEui) {
             action: 'lorawanMeter',
             method: 'getAreaArchiveInfo',
             apiToken,
-            param: { devEui },
+            param: { deveui: devEui },
         };
 
         console.log(`[Lorawan] getAreaArchiveInfo devEui=${devEui}`);
@@ -206,7 +206,7 @@ async function rechargeMeter(devEui, amount) {
             method: 'remotelyTopUp',
             apiToken,
             param: {
-                devEui,
+                deveui: devEui,
                 topUpAmount,
                 topUpToDeviceAmount: topUpAmount,
             },
